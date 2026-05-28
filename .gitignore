@@ -17,10 +17,14 @@ __pycache__/
 
 # Virtual environments
 venv/
-.env/
 env/
 .pyenv/
 .venv/
+
+# 환경변수 (credentials — 절대 커밋 금지)
+.env
+.env.*
+!.env.example
 
 # Jupyter Notebook checkpoints
 .ipynb_checkpoints/
@@ -53,3 +57,6 @@ ehthumbs.db
 
 # Project-local data files (optional; uncomment if data should not be tracked)
 # data/
+
+# 아리수 원본 엑셀 (용량 크고 재생성 가능)
+data/arisu_station_history/raw/
