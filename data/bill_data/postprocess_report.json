@@ -1,0 +1,37 @@
+{
+  "review_xlsx": "@수도요금 고지서 데이터 3차검토_260518.xlsx",
+  "review_total_rows_with_mkey": 370,
+  "review_unique_mkeys": 370,
+  "crawled_mkeys": 95,
+  "mkey_station_mapped": 80,
+  "mkey_unmapped_examples": [
+    "900737363",
+    "907068077",
+    "907121604",
+    "907138033",
+    "907196203",
+    "907208454",
+    "907208549",
+    "916139906",
+    "916139907",
+    "916139965"
+  ],
+  "bills_initial": 10275,
+  "bills_after_gubun_filter": 10260,
+  "bills_after_null_filter": 10260,
+  "bills_clean_final": 10260,
+  "bills_clean_stations": 79,
+  "station_month_baseline_rows": 948,
+  "mkey_month_baseline_rows": 960,
+  "daily_csvs": 80,
+  "meter_match_pairs": 80,
+  "meter_match_reasons": {
+    "station_only": 54,
+    "line": 22,
+    "exact": 4
+  },
+  "unmatched_bill_mkeys": [],
+  "unmatched_daily_csvs": [],
+  "daily_csv_baseline_rows": 960,
+  "daily_csvs_with_baseline": 80
+}
