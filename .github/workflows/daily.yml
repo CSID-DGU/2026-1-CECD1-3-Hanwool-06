@@ -32,8 +32,20 @@ jobs:
 
       - name: 결과 커밋
         run: |
+          DATE=$(python3 -c "from datetime import date, timedelta; print(date.today() - timedelta(days=1))")
+          CSV="data/daily/${DATE}.csv"
+
+          # CSV를 임시 저장
+          cp "${CSV}" "/tmp/${DATE}.csv"
+
+          # data/daily 브랜치로 전환
+          git fetch origin data/daily
+          git checkout data/daily
+          mkdir -p data/daily
+          cp "/tmp/${DATE}.csv" "${CSV}"
+
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/daily/
-          git diff --staged --quiet || git commit -m "data: $(date +'%Y-%m-%d') 일일 사용량 자동 수집"
+          git add "${CSV}"
+          git diff --staged --quiet || git commit -m "data: ${DATE} 일일 사용량 자동 수집"
           git push origin data/daily
