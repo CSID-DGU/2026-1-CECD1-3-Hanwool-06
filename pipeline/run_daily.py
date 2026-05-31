@@ -12,11 +12,9 @@ import traceback
 from datetime import date, timedelta
 from pathlib import Path
 
-# pipeline 패키지 경로 추가
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from scraper  import scrape
-from detector import detect
+from scraper import scrape
 
 
 def run(target_date: date | None = None) -> bool:
@@ -27,22 +25,11 @@ def run(target_date: date | None = None) -> bool:
     print(f"[파이프라인 시작] 대상 날짜: {target_date}")
     print(f"{'='*50}")
 
-    # 1단계: 수집
-    print("\n[1/2] 데이터 수집")
     try:
         csv_path = scrape(target_date)
         print(f"  → {csv_path}")
     except Exception as e:
         print(f"  ❌ 수집 실패: {e}")
-        traceback.print_exc()
-        return False
-
-    # 2단계: 탐지
-    print("\n[2/2] 이상치 탐지")
-    try:
-        detect(target_date)
-    except Exception as e:
-        print(f"  ❌ 탐지 실패: {e}")
         traceback.print_exc()
         return False
 
