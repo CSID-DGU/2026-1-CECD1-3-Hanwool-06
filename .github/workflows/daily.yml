@@ -12,8 +12,6 @@ jobs:
     steps:
       - name: 코드 체크아웃
         uses: actions/checkout@v4
-        with:
-          ref: data/daily
 
       - name: Python 설치
         uses: actions/setup-python@v5
