@@ -40,7 +40,7 @@ jobs:
 
           # data/daily 브랜치로 전환
           git fetch origin data/daily
-          git checkout data/daily
+          git switch data/daily
           mkdir -p data/daily
           cp "/tmp/${DATE}.csv" "${CSV}"
 
