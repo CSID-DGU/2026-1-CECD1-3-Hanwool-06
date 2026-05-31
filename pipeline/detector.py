@@ -19,8 +19,8 @@ from sklearn.ensemble import IsolationForest
 from statsmodels.tsa.seasonal import STL
 
 ROOT      = Path(__file__).resolve().parent.parent
-HIST_PATH = ROOT / "data" / "Processed_data" / "일일사용량.csv"
-CAL_PATH  = ROOT / "data" / "Processed_data" / "날짜인덱스.csv"
+HIST_PATH = ROOT / "data" / "processed_data" / "일일사용량.csv"
+CAL_PATH  = ROOT / "data" / "processed_data" / "날짜인덱스.csv"
 DAILY_DIR = ROOT / "data" / "daily"
 
 MZ_WARN   = 2.5    # 주의 기준 (Modified Z-score)
