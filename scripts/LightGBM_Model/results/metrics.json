@@ -1,0 +1,48 @@
+{
+  "model": "LightGBM",
+  "mode": "validation=train->valid, final=train+valid->test",
+  "postprocess": {
+    "valid_station_dow_bias_weight": 0.2,
+    "online_residual_alpha": 0.02,
+    "online_residual_clip": 10.0
+  },
+  "feature_count": 132,
+  "train_rows_for_valid_model": 44669,
+  "train_rows_for_final_model": 55473,
+  "valid": {
+    "rmse": 8.7597,
+    "rmse_without_data_errors": 8.7597,
+    "rmse_non_alert_diagnostic": 5.7949,
+    "rmse_non_alert_clean_diagnostic": 5.7949,
+    "rmse_normal_only": 3.8884,
+    "mae_normal_only": 2.6007,
+    "mae_all": 3.7384,
+    "n_samples": 10872,
+    "n_normal": 10763,
+    "n_normal_only": 10328,
+    "n_clean": 10872,
+    "경고": 109,
+    "주의": 435,
+    "과다": 338,
+    "과소": 206,
+    "data_error_candidate": 0
+  },
+  "test": {
+    "rmse": 390.9777,
+    "rmse_without_data_errors": 3.8729,
+    "rmse_non_alert_diagnostic": 2.7277,
+    "rmse_non_alert_clean_diagnostic": 2.7277,
+    "rmse_normal_only": 2.1392,
+    "mae_normal_only": 1.518,
+    "mae_all": 5.7359,
+    "n_samples": 10253,
+    "n_normal": 10190,
+    "n_normal_only": 10000,
+    "n_clean": 10250,
+    "경고": 63,
+    "주의": 190,
+    "과다": 168,
+    "과소": 85,
+    "data_error_candidate": 3
+  }
+}

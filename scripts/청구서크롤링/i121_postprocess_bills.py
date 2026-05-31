@@ -1,7 +1,23 @@
-"""크롤링된 청구서 + Excel 검토표 → Processed_data/Bill_Data/ 정형화 (3단계)."""
+#!/usr/bin/env python3
+"""Postprocess i121 crawled bills + review xlsx into training-ready data.
+
+Inputs:
+    Raw_data/i121_bills/bills_long.csv               crawled bills (10K+ rows)
+    Raw_data/@수도요금 고지서 데이터 ?차검토_*.xlsx   authoritative mkey↔역명 map
+    Raw_data/일일데이터/*.csv                        per-meter daily readings
+
+Outputs (under Processed_data/i121/):
+    mkey_station_map.csv          one row per crawled mkey
+    bills_clean.csv               filtered, joined, slim bills
+    station_month_baseline.csv    seasonal baseline at station level
+    mkey_month_baseline.csv       seasonal baseline at meter level
+    station_daily_match.csv       station ↔ daily-csv mapping
+    postprocess_report.json       counts + diagnostics
+"""
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import re
@@ -9,6 +25,13 @@ import unicodedata
 from pathlib import Path
 
 import pandas as pd
+
+
+ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_RAW = ROOT / "Raw_data"
+DEFAULT_BILLS = ROOT / "Raw_data" / "i121_bills" / "bills_long.csv"
+DEFAULT_DAILY = ROOT / "Raw_data" / "일일데이터"
+DEFAULT_OUT = ROOT / "Processed_data" / "Bill_Data"
 
 
 COLUMN_RENAME_KR: dict[str, str] = {
@@ -45,25 +68,22 @@ COLUMN_RENAME_KR: dict[str, str] = {
 }
 
 
-STATION_ALIASES: dict[str, str] = {
-    "이수역": "총신대입구역",
-}
-
-
 def write_csv_kr(df: pd.DataFrame, path: Path) -> None:
-    """UTF-8-BOM CSV, 한글 컬럼명."""
-    df.rename(columns=COLUMN_RENAME_KR).to_csv(path, index=False, encoding="utf-8-sig")
+    """Write a DataFrame as UTF-8-BOM CSV with columns renamed to Korean."""
+    df.rename(columns=COLUMN_RENAME_KR).to_csv(
+        path, index=False, encoding="utf-8-sig"
+    )
 
 
 def find_review_xlsx(raw_dir: Path) -> Path:
-    """가장 최근 '검토' xlsx 찾기 (NFD 파일명 처리 포함)."""
+    """Locate the most recent 검토 xlsx (NFD filenames OK)."""
     candidates: list[tuple[str, Path]] = []
     for name in os.listdir(raw_dir):
         nfc = unicodedata.normalize("NFC", name)
         if "검토" in nfc and name.endswith(".xlsx"):
             candidates.append((nfc, raw_dir / name))
     if not candidates:
-        raise FileNotFoundError(f"{raw_dir} 에 '검토' xlsx 가 없습니다")
+        raise FileNotFoundError(f"no 검토 xlsx found in {raw_dir}")
     candidates.sort(key=lambda t: t[0])
     return candidates[-1][1]
 
@@ -96,13 +116,38 @@ def load_review(xlsx_path: Path) -> pd.DataFrame:
     return df
 
 
+STATION_ALIASES: dict[str, str] = {
+    "이수역": "총신대입구역",
+}
+
+
 def _paren_handler(match: re.Match) -> str:
+    """Keep parens content only when it IS the '역' marker itself.
+
+    '(역)' → keep '역' (e.g. '동묘앞(역)' → '동묘앞역')
+    '(무역센터)' / '(능동)' / '(강동구민회관앞)' → drop entirely
+    """
     inside = match.group(1).strip()
     return inside if inside == "역" else ""
 
 
 def parse_station_meter(name) -> tuple[str, int | None, str | None]:
-    """역명 라벨 → (역명_base, 호선, 용도) 분해."""
+    """Parse a station label into (station_base, line_no, usage_type).
+
+    Only treats a digit as a line number when it sits next to the trailing '역'
+    or at the very end of the name. Middle digits (e.g. '을지로3가') are kept as
+    part of the station base.
+
+      '동대문역사문화공원역(2호선)' -> ('동대문역사문화공원역', 2, None)
+      '동대문역사문화공원역2'      -> ('동대문역사문화공원역', 2, None)
+      '시청1역' / '시청역1'         -> ('시청역', 1, None)
+      '을지로3가역(2호선)'          -> ('을지로3가역', 2, None)
+      '을지로3가역2'                -> ('을지로3가역', 2, None)
+      '보문역-직원용'               -> ('보문역', None, '직원용')
+      '이수(총신대입구)역(4호선)'   -> ('총신대입구역', 4, None)   # alias
+      '굽은다리(강동구민회관앞)역'   -> ('굽은다리역', None, None)
+      '동묘앞(역)'                  -> ('동묘앞역', None, None)
+    """
     if not isinstance(name, str):
         return ("", None, None)
     name = name.strip()
@@ -137,7 +182,14 @@ def parse_station_meter(name) -> tuple[str, int | None, str | None]:
 def match_meter_level(
     bill_recs: list[dict], daily_recs: list[dict]
 ) -> list[tuple[int, int, str]]:
-    """청구서 미터 ↔ 일일 CSV 1:1 매칭 (4단계 progressive fallback)."""
+    """1-to-1 match by (station_base, line, usage_type) with progressive fallback.
+
+    Pass order:
+      1) exact (station + line + usage)
+      2) (station + line)
+      3) (station + usage)
+      4) station alone, only when exactly 1 candidate remains on each side
+    """
     from collections import defaultdict
 
     matches: list[tuple[int, int, str]] = []
@@ -190,56 +242,54 @@ def match_meter_level(
     return matches
 
 
-def _agg_stats(group: pd.Series) -> pd.Series:
-    s = group.dropna()
-    return pd.Series(
-        {
-            "n_obs": int(s.count()),
-            "median_ton": float(s.median()) if len(s) else float("nan"),
-            "mean_ton": float(s.mean()) if len(s) else float("nan"),
-            "p25_ton": float(s.quantile(0.25)) if len(s) else float("nan"),
-            "p75_ton": float(s.quantile(0.75)) if len(s) else float("nan"),
-            "std_ton": float(s.std()) if len(s) > 1 else 0.0,
-        }
-    )
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--raw-dir", type=Path, default=DEFAULT_RAW)
+    parser.add_argument("--bills-csv", type=Path, default=DEFAULT_BILLS)
+    parser.add_argument("--daily-dir", type=Path, default=DEFAULT_DAILY)
+    parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUT)
+    return parser.parse_args()
 
 
-def run(raw_dir: Path, bills_csv: Path, daily_dir: Path, out_dir: Path) -> Path:
-    """크롤링 결과 + 검토 xlsx → Processed_data/Bill_Data/ 출력."""
-    out_dir.mkdir(parents=True, exist_ok=True)
+def main() -> int:
+    args = parse_args()
+    args.out_dir.mkdir(parents=True, exist_ok=True)
 
-    print("  [post 1/8] 검토 xlsx 로드", flush=True)
-    review_path = find_review_xlsx(raw_dir)
+    print("=== 1) load review xlsx ===", flush=True)
+    review_path = find_review_xlsx(args.raw_dir)
     review = load_review(review_path)
-    print(f"    file: {review_path.name}  rows: {len(review)}  unique mkeys: {review['mkey'].nunique()}")
+    print(f"  review file:   {review_path.name}")
+    print(f"  review rows:   {len(review)}  unique mkeys: {review['mkey'].nunique()}")
 
-    print("  [post 2/8] 크롤링된 청구서 로드", flush=True)
-    bills_raw = pd.read_csv(bills_csv, encoding="utf-8-sig", dtype={"mkey": str})
+    print("\n=== 2) load crawled bills ===", flush=True)
+    bills_raw = pd.read_csv(args.bills_csv, encoding="utf-8-sig", dtype={"mkey": str})
     crawled_mkeys = sorted(bills_raw["mkey"].unique())
-    print(f"    bills_long rows: {len(bills_raw)}  unique mkeys: {len(crawled_mkeys)}")
+    print(f"  bills_long rows: {len(bills_raw)}  unique mkeys: {len(crawled_mkeys)}")
 
-    print("  [post 3/8] mkey_station_map.csv 생성", flush=True)
+    print("\n=== 3) build mkey_station_map.csv ===", flush=True)
     map_full = review[
-        [
-            "mkey", "station", "office", "water_office", "bill_name",
-            "usage_type", "review_dongguk", "review_planning",
-        ]
+        ["mkey", "station", "office", "water_office", "bill_name",
+         "usage_type", "review_dongguk", "review_planning"]
     ].drop_duplicates(subset=["mkey"], keep="first")
     mkey_map = map_full[map_full["mkey"].isin(crawled_mkeys)].copy()
     unmapped = sorted(set(crawled_mkeys) - set(mkey_map["mkey"]))
-    map_path = out_dir / "mkey_station_map.csv"
+    print(f"  mapped:   {len(mkey_map)} / {len(crawled_mkeys)}")
+    print(f"  unmapped: {len(unmapped)} {unmapped[:5]}")
+    map_path = args.out_dir / "mkey_station_map.csv"
     write_csv_kr(mkey_map.sort_values(["station", "mkey"]), map_path)
-    print(f"    mapped: {len(mkey_map)}/{len(crawled_mkeys)} → {map_path}")
+    print(f"  → {map_path.relative_to(ROOT)}")
 
-    print("  [post 4/8] bills_clean.csv", flush=True)
+    print("\n=== 4) clean bills_long → bills_clean ===", flush=True)
     bills = bills_raw.merge(
         mkey_map[["mkey", "station", "office", "usage_type", "bill_name"]],
-        on="mkey", how="left",
+        on="mkey",
+        how="left",
     )
     n_initial = len(bills)
     bills = bills[bills["gubun"] == "정기분"].copy()
     n_after_gubun = len(bills)
-    bills = bills[bills["napgi"].notna() & bills["total_usage_ton"].notna()].copy()
+    bills = bills[bills["napgi"].notna()].copy()
+    bills = bills[bills["total_usage_ton"].notna()].copy()
     n_after_null = len(bills)
     bills["napgi_date"] = pd.to_datetime(bills["napgi"], errors="coerce")
     bills = bills[bills["napgi_date"].notna()].copy()
@@ -256,13 +306,17 @@ def run(raw_dir: Path, bills_csv: Path, daily_dir: Path, out_dir: Path) -> Path:
         "total_usage_ton", "monthly_avg_ton", "bugwa_amount_won",
     ]
     bills_clean = (
-        bills[slim_cols].sort_values(["station", "mkey", "napgi"]).reset_index(drop=True)
+        bills[slim_cols]
+        .sort_values(["station", "mkey", "napgi"])
+        .reset_index(drop=True)
     )
-    bills_clean_path = out_dir / "bills_clean.csv"
+    bills_clean_path = args.out_dir / "bills_clean.csv"
     write_csv_kr(bills_clean, bills_clean_path)
-    print(f"    initial={n_initial} → 정기분={n_after_gubun} → notnull={n_after_null} → final={len(bills_clean)}")
+    print(f"  rows: initial={n_initial}  after gubun=='정기분'={n_after_gubun}  "
+          f"after non-null filter={n_after_null}  final={len(bills_clean)}")
+    print(f"  → {bills_clean_path.relative_to(ROOT)}")
 
-    print("  [post 5/8] 2개월 청구서 → 캘린더 월 attribution", flush=True)
+    print("\n=== 5) attribute bi-monthly bills to calendar months ===", flush=True)
     attrib_records: list[dict] = []
     for row in bills_clean.itertuples():
         if pd.isna(row.total_usage_ton) or row.total_usage_ton <= 0:
@@ -280,29 +334,54 @@ def run(raw_dir: Path, bills_csv: Path, daily_dir: Path, out_dir: Path) -> Path:
                 }
             )
     attrib = pd.DataFrame(attrib_records)
-    print(f"    attribution rows: {len(attrib)}")
+    print(f"  attribution rows: {len(attrib)}  "
+          f"(non-positive bills skipped: "
+          f"{len(bills_clean) - (len(attrib) // 2)})")
 
-    print("  [post 6/8] station/mkey 월별 baseline", flush=True)
+    print("\n=== 6) build station_month_baseline + mkey_month_baseline ===", flush=True)
+    def agg_stats(group: pd.Series) -> pd.Series:
+        s = group.dropna()
+        return pd.Series(
+            {
+                "n_obs": int(s.count()),
+                "median_ton": float(s.median()) if len(s) else float("nan"),
+                "mean_ton": float(s.mean()) if len(s) else float("nan"),
+                "p25_ton": float(s.quantile(0.25)) if len(s) else float("nan"),
+                "p75_ton": float(s.quantile(0.75)) if len(s) else float("nan"),
+                "std_ton": float(s.std()) if len(s) > 1 else 0.0,
+            }
+        )
+
     station_bl = (
         attrib.dropna(subset=["station"])
         .groupby(["station", "calendar_month"])["monthly_avg_ton"]
-        .apply(_agg_stats).unstack().reset_index()
+        .apply(agg_stats)
+        .unstack()
+        .reset_index()
         .sort_values(["station", "calendar_month"])
     )
     station_bl["iqr_ton"] = station_bl["p75_ton"] - station_bl["p25_ton"]
-    write_csv_kr(station_bl, out_dir / "station_month_baseline.csv")
+    station_bl_path = args.out_dir / "station_month_baseline.csv"
+    write_csv_kr(station_bl, station_bl_path)
+    print(f"  station_month_baseline rows: {len(station_bl)}")
+    print(f"  → {station_bl_path.relative_to(ROOT)}")
 
     mkey_bl = (
         attrib.groupby(["mkey", "station", "calendar_month"])["monthly_avg_ton"]
-        .apply(_agg_stats).unstack().reset_index()
+        .apply(agg_stats)
+        .unstack()
+        .reset_index()
         .sort_values(["mkey", "calendar_month"])
     )
     mkey_bl["iqr_ton"] = mkey_bl["p75_ton"] - mkey_bl["p25_ton"]
-    write_csv_kr(mkey_bl, out_dir / "mkey_month_baseline.csv")
-    print(f"    station_bl={len(station_bl)} mkey_bl={len(mkey_bl)}")
+    mkey_bl_path = args.out_dir / "mkey_month_baseline.csv"
+    write_csv_kr(mkey_bl, mkey_bl_path)
+    print(f"  mkey_month_baseline rows: {len(mkey_bl)}")
+    print(f"  → {mkey_bl_path.relative_to(ROOT)}")
 
-    print("  [post 7/8] 미터 1:1 매칭 (청구서 ↔ 일일 CSV)", flush=True)
-    daily_files = sorted(daily_dir.glob("*.csv"))
+    print("\n=== 7) meter-level match: bill mkey ↔ daily csv (1-to-1) ===", flush=True)
+    daily_files = sorted(args.daily_dir.glob("*.csv"))
+
     bill_recs: list[dict] = []
     for row in mkey_map.itertuples():
         station_base, line, usage_from_name = parse_station_meter(row.station)
@@ -316,6 +395,7 @@ def run(raw_dir: Path, bills_csv: Path, daily_dir: Path, out_dir: Path) -> Path:
                 "usage_type": usage_type,
             }
         )
+
     daily_recs: list[dict] = []
     for f in daily_files:
         station_base, line, usage = parse_station_meter(f.stem)
@@ -327,9 +407,11 @@ def run(raw_dir: Path, bills_csv: Path, daily_dir: Path, out_dir: Path) -> Path:
                 "usage_type": usage,
             }
         )
+
     pairs = match_meter_level(bill_recs, daily_recs)
     matched_bi: set[int] = {bi for bi, _, _ in pairs}
     matched_di: set[int] = {di for _, di, _ in pairs}
+
     meter_rows: list[dict] = []
     for bi, di, reason in pairs:
         b = bill_recs[bi]
@@ -348,13 +430,25 @@ def run(raw_dir: Path, bills_csv: Path, daily_dir: Path, out_dir: Path) -> Path:
     meter_match = pd.DataFrame(meter_rows).sort_values(
         ["station_base", "line", "usage_type"], na_position="last"
     )
-    write_csv_kr(meter_match, out_dir / "meter_match.csv")
-    unmatched_bills = [bill_recs[i]["mkey"] for i in range(len(bill_recs)) if i not in matched_bi]
-    unmatched_daily = [daily_recs[i]["csv_stem"] for i in range(len(daily_recs)) if i not in matched_di]
-    print(f"    pairs: {len(meter_match)}  reasons: {dict(meter_match['match_reason'].value_counts())}")
-    print(f"    unmatched bills: {len(unmatched_bills)}  unmatched daily: {len(unmatched_daily)}")
+    meter_match_path = args.out_dir / "meter_match.csv"
+    write_csv_kr(meter_match, meter_match_path)
 
-    print("  [post 8/8] daily CSV별 월별 baseline + report.json", flush=True)
+    unmatched_bills = [
+        bill_recs[i]["mkey"] for i in range(len(bill_recs)) if i not in matched_bi
+    ]
+    unmatched_daily = [
+        daily_recs[i]["csv_stem"]
+        for i in range(len(daily_recs))
+        if i not in matched_di
+    ]
+    print(f"  bill mkeys: {len(bill_recs)}  daily csvs: {len(daily_recs)}")
+    print(f"  matched (1-to-1): {len(meter_match)}")
+    print(f"  match reasons: {dict(meter_match['match_reason'].value_counts())}")
+    print(f"  unmatched bill mkeys: {len(unmatched_bills)} → {unmatched_bills[:5]}")
+    print(f"  unmatched daily csvs: {len(unmatched_daily)} → {unmatched_daily[:5]}")
+    print(f"  → {meter_match_path.relative_to(ROOT)}")
+
+    print("\n=== 7.5) per-daily-csv monthly baseline ===", flush=True)
     baseline_for_daily = meter_match[
         ["daily_csv_stem", "mkey", "station_base", "line", "usage_type"]
     ].merge(mkey_bl, on="mkey", how="left")
@@ -366,9 +460,16 @@ def run(raw_dir: Path, bills_csv: Path, daily_dir: Path, out_dir: Path) -> Path:
     baseline_for_daily = baseline_for_daily[baseline_cols].sort_values(
         ["daily_csv_stem", "calendar_month"]
     )
-    write_csv_kr(baseline_for_daily, out_dir / "daily_csv_baseline.csv")
+    baseline_for_daily_path = args.out_dir / "daily_csv_baseline.csv"
+    write_csv_kr(baseline_for_daily, baseline_for_daily_path)
     n_csvs_with_baseline = baseline_for_daily["daily_csv_stem"].nunique()
+    print(
+        f"  rows: {len(baseline_for_daily)} "
+        f"({n_csvs_with_baseline} daily csvs × 12 months)"
+    )
+    print(f"  → {baseline_for_daily_path.relative_to(ROOT)}")
 
+    print("\n=== 8) write report ===", flush=True)
     report = {
         "review_xlsx": unicodedata.normalize("NFC", review_path.name),
         "review_total_rows_with_mkey": int(len(review)),
@@ -393,9 +494,15 @@ def run(raw_dir: Path, bills_csv: Path, daily_dir: Path, out_dir: Path) -> Path:
         "daily_csv_baseline_rows": int(len(baseline_for_daily)),
         "daily_csvs_with_baseline": int(n_csvs_with_baseline),
     }
-    report_path = out_dir / "postprocess_report.json"
+    report_path = args.out_dir / "postprocess_report.json"
     report_path.write_text(
-        json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
+        json.dumps(report, ensure_ascii=False, indent=2),
+        encoding="utf-8",
     )
-    print(f"    → {report_path}")
-    return report_path
+    print(f"  → {report_path.relative_to(ROOT)}")
+    print("\n=== DONE ===")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

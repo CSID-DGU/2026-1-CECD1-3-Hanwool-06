@@ -1,5 +1,3 @@
-"""i121 청구서 HTML 파싱 (m_key 추출 / 부과내역 / 납부내역)."""
-
 from __future__ import annotations
 
 import re
@@ -13,7 +11,7 @@ _STATION_RE = re.compile(r"([가-힣A-Za-z0-9]+역)")
 
 
 def discover_mkeys(html: str) -> list[str]:
-    """<select name="mkey"> dropdown 에서 고객번호 추출."""
+    """Extract customer numbers from the <select name="mkey"> dropdown."""
     soup = BeautifulSoup(html, "lxml")
     select = soup.find("select", {"name": "mkey"}) or soup.find("select", {"id": "mkey"})
     mkeys: list[str] = []
@@ -32,7 +30,11 @@ def discover_mkeys(html: str) -> list[str]:
 
 
 def parse_bill_list(html: str) -> list[dict[str, Any]]:
-    """NR_myArisu.do 응답의 부과내역 테이블 파싱."""
+    """Parse 부과내역 table from NR_myArisu.do response.
+
+    Returns one dict per bill row. Empty list when no bills (the page
+    shows '조회된 결과가 없습니다' inside a colspan row).
+    """
     soup = BeautifulSoup(html, "lxml")
     table = _find_table_by_caption(soup, "부과내역이며")
     if table is None:
@@ -45,6 +47,7 @@ def parse_bill_list(html: str) -> list[dict[str, Any]]:
     for tr in tbody.find_all("tr"):
         cells = tr.find_all("td")
         if len(cells) < 8:
+            # 'no result' row uses a single colspan'd td
             continue
         sunbeon = _clean(cells[0].get_text())
         if not sunbeon.isdigit():
@@ -77,7 +80,7 @@ def parse_bill_list(html: str) -> list[dict[str, Any]]:
 
 
 def parse_payment_list(html: str) -> list[dict[str, Any]]:
-    """납부내역 테이블 파싱."""
+    """Parse 납부내역 table from NR_myArisu.do response."""
     soup = BeautifulSoup(html, "lxml")
     table = _find_table_by_caption(soup, "납부내역이며")
     if table is None:

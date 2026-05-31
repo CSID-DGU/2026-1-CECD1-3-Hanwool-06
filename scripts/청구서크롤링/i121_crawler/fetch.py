@@ -1,16 +1,14 @@
-"""i121 청구서 페이지 HTTP fetch (캐시 포함)."""
-
 from __future__ import annotations
 
 from pathlib import Path
 
 import requests
 
-from auth import BASE, MYARISU_URL
+from .auth import BASE, MYARISU_URL
 
 
 def shift_month(ym: str, delta: int) -> str:
-    """YYYY-MM 문자열을 delta 개월만큼 이동."""
+    """Shift a YYYY-MM string by an integer number of months."""
     y, m = map(int, ym.split("-"))
     idx = y * 12 + (m - 1) + delta
     return f"{idx // 12:04d}-{(idx % 12) + 1:02d}"
@@ -26,7 +24,11 @@ def fetch_bill_window(
     timeout: float = 30.0,
     force: bool = False,
 ) -> tuple[str, bool]:
-    """(mkey, start_ym~end_ym) 윈도우 HTML 가져오기 → (html, was_cached)."""
+    """Fetch the mypage HTML for one (mkey, year-window).
+
+    Returns (html_text, was_cached). Cached pages are read from disk and
+    no request is made.
+    """
     cache_dir.mkdir(parents=True, exist_ok=True)
     cache_path = cache_dir / f"{mkey}_{start_ym}_{end_ym}.html"
     if cache_path.exists() and not force:

@@ -1,5 +1,3 @@
-"""i121.seoul.go.kr 로그인 세션 관리."""
-
 from __future__ import annotations
 
 import os
@@ -34,17 +32,20 @@ def _new_session() -> requests.Session:
 
 
 def login(user_id: str, user_pwd: str, *, timeout: float = 30.0) -> requests.Session:
-    """폼 로그인 → 인증된 세션 반환. 실패 시 LoginError."""
+    """Perform form login and return an authenticated session.
+
+    Raises LoginError if the session cannot reach the protected mypage.
+    """
     if not user_id or not user_pwd:
-        raise LoginError("user_id / user_pwd 가 비어 있습니다")
+        raise LoginError("user_id and user_pwd must be non-empty")
 
     session = _new_session()
 
-    # 쿠키 prime
+    # Prime cookies on the login form
     r = session.get(LOGIN_FORM_URL, params={"_m": "m7"}, timeout=timeout)
     r.raise_for_status()
 
-    # 자격 증명 제출
+    # Submit credentials
     r = session.post(
         LOGIN_ACTION_URL,
         data={"userId": user_id, "userPwd": user_pwd},
@@ -60,23 +61,24 @@ def login(user_id: str, user_pwd: str, *, timeout: float = 30.0) -> requests.Ses
     r.raise_for_status()
     login_body = r.text.strip()
 
-    # 보호된 페이지로 검증
+    # Verify by hitting a member-only page
     verify = session.get(MYARISU_URL, params={"_m": "m6"}, timeout=timeout)
     verify.raise_for_status()
     if _looks_like_login_page(verify.text) or "NR_loginForm.do" in verify.url:
         raise LoginError(
-            f"로그인 실패. login_action_body={login_body!r}; verify_url={verify.url!r}"
+            f"login appears to have failed; "
+            f"login_action_body={login_body!r}; verify_url={verify.url!r}"
         )
     return session
 
 
 def _looks_like_login_page(html: str) -> bool:
-    markers = ('name="userId"', 'name="userPwd"', "로그인이 필요")
+    markers = ("name=\"userId\"", "name=\"userPwd\"", "로그인이 필요")
     return any(m in html for m in markers)
 
 
 def session_from_env(env_path: Path | str | None = None) -> requests.Session:
-    """.env 에서 I121_USER_ID / I121_USER_PWD 읽어 로그인."""
+    """Load I121_USER_ID / I121_USER_PWD from .env and log in."""
     if env_path is not None:
         load_dotenv(dotenv_path=env_path, override=True)
     else:
@@ -85,7 +87,7 @@ def session_from_env(env_path: Path | str | None = None) -> requests.Session:
     user_pwd = os.environ.get("I121_USER_PWD", "").strip()
     if not user_id or not user_pwd:
         raise LoginError(
-            "자격 증명 누락. .env.example 을 복사해 .env 를 만들고 "
-            "I121_USER_ID / I121_USER_PWD 를 설정하세요."
+            "missing credentials; copy .env.example to .env and set "
+            "I121_USER_ID / I121_USER_PWD"
         )
     return login(user_id, user_pwd)
