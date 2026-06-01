@@ -35,8 +35,9 @@ jobs:
           DATE=$(python3 -c "from datetime import date, timedelta; print(date.today() - timedelta(days=1))")
           CSV="data/daily/water/${DATE}.csv"
 
-          # CSV를 임시 저장
+          # CSV를 임시 저장 후 원본 삭제 (브랜치 전환 충돌 방지)
           cp "${CSV}" "/tmp/${DATE}.csv"
+          rm "${CSV}"
 
           # daily-collect 브랜치로 전환
           git fetch origin daily-collect
