@@ -20,7 +20,7 @@ jobs:
           cache: 'pip'
 
       - name: 패키지 설치
-        run: pip install -r pipeline/requirements.txt
+        run: pip install -r pipeline/daily_water/requirements.txt
 
       - name: .env 생성
         run: |
@@ -28,7 +28,7 @@ jobs:
           echo "ARISU_USER_PWD=${{ secrets.ARISU_USER_PWD }}" >> .env
 
       - name: 파이프라인 실행
-        run: python pipeline/run_daily.py
+        run: python pipeline/daily_water/run_daily.py
 
       - name: 결과 커밋
         run: |
@@ -47,5 +47,5 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add "${CSV}"
-          git diff --staged --quiet || git commit -m "data: ${DATE} 일일 사용량 자동 수집"
+          git diff --staged --quiet || git commit -m "data: ${DATE} 일일 상수도 사용량 자동 수집"
           git push origin daily-collect

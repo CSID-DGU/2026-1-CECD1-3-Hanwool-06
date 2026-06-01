@@ -2,8 +2,8 @@
 매일 1회 실행되는 파이프라인 진입점 (GitHub Actions daily.yml 에서 호출).
 
 직접 실행:
-  python pipeline/run_daily.py              # 어제 날짜
-  python pipeline/run_daily.py 2026-05-05   # 특정 날짜
+  python pipeline/daily_water/run_daily.py              # 어제 날짜
+  python pipeline/daily_water/run_daily.py 2026-05-05   # 특정 날짜
 """
 
 import argparse
