@@ -1,0 +1,55 @@
+name: 일별 승하차 인원 수집
+
+on:
+  schedule:
+    - cron: '0 23 * * *'  # 매일 23:00 UTC = 한국시간 08:00
+  workflow_dispatch:       # 수동 실행 버튼도 활성화
+
+jobs:
+  run-pipeline:
+    runs-on: ubuntu-latest
+    env:
+      TZ: Asia/Seoul   # 날짜 계산을 KST 기준으로 (데이터 사용일자가 KST)
+
+    steps:
+      - name: 코드 체크아웃
+        uses: actions/checkout@v4
+
+      - name: Python 설치
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      # 표준 라이브러리(urllib/csv/json)만 써서 pip 설치 단계 없음
+
+      - name: .env 생성
+        run: echo "SEOUL_PSGR_KEY=${{ secrets.SEOUL_PSGR_KEY }}" >> .env
+
+      - name: 파이프라인 실행 (최근 3일치 — 적재 지연 대비 자가복구)
+        run: |
+          START=$(python3 -c "from datetime import date, timedelta; print(date.today() - timedelta(days=3))")
+          END=$(python3 -c "from datetime import date, timedelta; print(date.today() - timedelta(days=1))")
+          echo "수집 범위: $START ~ $END"
+          python pipeline/daily_ridership/run_daily.py "$START" "$END"
+
+      - name: 결과 커밋 (daily-collect 브랜치 data/daily/ridership/)
+        run: |
+          # 방금 만든 CSV들을 임시 보관 후 브랜치 전환 (충돌 방지)
+          mkdir -p /tmp/ridership
+          cp data/daily/ridership/*.csv /tmp/ridership/ 2>/dev/null || true
+          rm -f data/daily/ridership/*.csv
+
+          git fetch origin daily-collect
+          git switch daily-collect
+          mkdir -p data/daily/ridership
+          cp /tmp/ridership/*.csv data/daily/ridership/ 2>/dev/null || true
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/daily/ridership
+          if git diff --staged --quiet; then
+            echo "변경 없음 — 커밋 생략"
+            exit 0
+          fi
+          git commit -m "data: 일일 승하차 인원 자동 수집 (~$(python3 -c 'from datetime import date, timedelta; print(date.today() - timedelta(days=1))'))"
+          git pull --rebase origin daily-collect || true   # 사용량 잡과 동시 푸시 경합 대비
+          git push origin daily-collect
