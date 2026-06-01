@@ -1,7 +1,7 @@
 """
 아리수 일별 사용량 스크래퍼
 
-기본 동작: 어제 날짜(today - 1일) 데이터를 수집해 data/daily/YYYY-MM-DD.csv 로 저장.
+기본 동작: 어제 날짜(today - 1일) 데이터를 수집해 data/daily/water/YYYY-MM-DD.csv 로 저장.
 직접 실행 시 날짜를 인자로 줄 수 있음:
     python scraper.py              # 어제 데이터
     python scraper.py 2026-05-26   # 특정 날짜
