@@ -20,7 +20,7 @@ from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 
 # 프로젝트 루트 기준으로 .env 로드
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent
 load_dotenv(ROOT / ".env")
 
 USER_ID  = os.getenv("ARISU_USER_ID")
