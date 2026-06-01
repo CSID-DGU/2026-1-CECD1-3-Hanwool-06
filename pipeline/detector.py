@@ -21,7 +21,7 @@ from statsmodels.tsa.seasonal import STL
 ROOT      = Path(__file__).resolve().parent.parent
 HIST_PATH = ROOT / "data" / "processed_data" / "일일사용량.csv"
 CAL_PATH  = ROOT / "data" / "processed_data" / "날짜인덱스.csv"
-DAILY_DIR = ROOT / "data" / "daily"
+DAILY_DIR = ROOT / "data" / "daily" / "water"
 
 MZ_WARN   = 2.5    # 주의 기준 (Modified Z-score)
 MZ_ALERT  = 3.5    # 경고 기준

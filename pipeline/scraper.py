@@ -26,7 +26,7 @@ load_dotenv(ROOT / ".env")
 USER_ID  = os.getenv("ARISU_USER_ID")
 USER_PWD = os.getenv("ARISU_USER_PWD")
 
-DAILY_DIR = ROOT / "data" / "daily"
+DAILY_DIR = ROOT / "data" / "daily" / "water"
 DAILY_DIR.mkdir(parents=True, exist_ok=True)
 
 CUSTOMER_MAP = {

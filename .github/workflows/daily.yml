@@ -1,4 +1,4 @@
-name: 일별 수도 사용량 수집 및 이상치 탐지
+name: 일별 상수도 사용량 수집
 
 on:
   schedule:
@@ -33,19 +33,19 @@ jobs:
       - name: 결과 커밋
         run: |
           DATE=$(python3 -c "from datetime import date, timedelta; print(date.today() - timedelta(days=1))")
-          CSV="data/daily/${DATE}.csv"
+          CSV="data/daily/water/${DATE}.csv"
 
           # CSV를 임시 저장
           cp "${CSV}" "/tmp/${DATE}.csv"
 
-          # data/daily 브랜치로 전환
-          git fetch origin data/daily
-          git switch data/daily
-          mkdir -p data/daily
+          # daily-collect 브랜치로 전환
+          git fetch origin daily-collect
+          git switch daily-collect
+          mkdir -p data/daily/water
           cp "/tmp/${DATE}.csv" "${CSV}"
 
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add "${CSV}"
           git diff --staged --quiet || git commit -m "data: ${DATE} 일일 사용량 자동 수집"
-          git push origin data/daily
+          git push origin daily-collect
