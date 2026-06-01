@@ -50,6 +50,6 @@ jobs:
             echo "변경 없음 — 커밋 생략"
             exit 0
           fi
-          git commit -m "data: 일일 승하차 인원 자동 수집 (~$(python3 -c 'from datetime import date, timedelta; print(date.today() - timedelta(days=1))'))"
+          git commit -m "data: $(python3 -c 'from datetime import date, timedelta; print(date.today() - timedelta(days=1))') 일일 승하차 인원 자동 수집"
           git pull --rebase origin daily-collect || true   # 사용량 잡과 동시 푸시 경합 대비
           git push origin daily-collect
