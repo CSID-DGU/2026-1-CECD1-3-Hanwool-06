@@ -29,7 +29,7 @@ jobs:
           START=$(python3 -c "from datetime import date, timedelta; print(date.today() - timedelta(days=3))")
           END=$(python3 -c "from datetime import date, timedelta; print(date.today() - timedelta(days=1))")
           echo "수집 범위: $START ~ $END"
-          python pipeline/daily_ridership/run_daily.py "$START" "$END"
+          python back/pipelines/daily_ridership/run_daily.py "$START" "$END"
 
       - name: 결과 커밋 (daily-collect 브랜치 data/daily/ridership/)
         run: |

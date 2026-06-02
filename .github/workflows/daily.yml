@@ -20,7 +20,7 @@ jobs:
           cache: 'pip'
 
       - name: 패키지 설치
-        run: pip install -r pipeline/daily_water/requirements.txt
+        run: pip install -r back/pipelines/daily_water/requirements.txt
 
       - name: .env 생성
         run: |
@@ -28,7 +28,7 @@ jobs:
           echo "ARISU_USER_PWD=${{ secrets.ARISU_USER_PWD }}" >> .env
 
       - name: 파이프라인 실행
-        run: python pipeline/daily_water/run_daily.py
+        run: python back/pipelines/daily_water/run_daily.py
 
       - name: 결과 커밋
         run: |
