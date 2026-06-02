@@ -1,0 +1,12 @@
+{
+  "name": "2026-1-CECD1-3-Hanwool-06",
+  "private": true,
+  "scripts": {
+    "dev": "npm run dev --workspace front",
+    "dev:front": "npm run dev --workspace front",
+    "install:all": "npm install --workspaces"
+  },
+  "workspaces": [
+    "front"
+  ]
+}
