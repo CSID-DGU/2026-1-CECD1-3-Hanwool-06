@@ -50,12 +50,12 @@ def run(config_path: Path | None = None) -> dict:
 
     valid_meta = dataset.split_meta(valid_data, "valid")
     valid_pred = valid_model.predict(X_valid)
-    # valid 잔차 |z| 분포의 q95/q99 를 임계값으로 확정 → test 에도 동일 적용
-    valid_scored = metric.score_residuals(valid_meta, valid_pred)
-    warn_t, alert_t = metric.quantile_thresholds(valid_scored["z_score"], warn_q, alert_q)
+    # valid 의 |deviation_score| 분포 q95/q99 를 임계값으로 확정 → test 에도 동일 적용
+    valid_scored = metric.score_predictions(valid_meta, valid_pred)
+    warn_t, alert_t = metric.score_quantiles(valid_scored["deviation_score"], warn_q, alert_q)
     valid_summary = metric.summarize(metric.classify(valid_scored, warn_t, alert_t))
     valid_bias = utils.build_valid_bias(valid_meta, valid_pred)
-    print(f"  임계값(|z|): 주의>={warn_t:.3f} (q{warn_q:g}), 경고>={alert_t:.3f} (q{alert_q:g})")
+    print(f"  임계값(|deviation_score|): 주의>={warn_t:.3f} (q{warn_q:g}), 경고>={alert_t:.3f} (q{alert_q:g})")
     print(f"  valid {utils.format_summary(valid_summary)}")
 
     # [2/2] 최종모델: train+valid 로 재학습, test 예측 → 후처리 → 이상탐지
@@ -72,8 +72,8 @@ def run(config_path: Path | None = None) -> dict:
     test_meta = dataset.split_meta(final_data, "test")
     test_pred_raw = final_model.predict(X_test)
     test_pred = utils.postprocess_predictions(test_meta, test_pred_raw, valid_bias, cfg)
-    test_anomalies = metric.classify(metric.score_residuals(test_meta, test_pred), warn_t, alert_t)
-    test_anomalies.insert(5, "raw_pred_ton", np.asarray(test_pred_raw, dtype=float).round(3))
+    test_anomalies = metric.classify(metric.score_predictions(test_meta, test_pred), warn_t, alert_t)
+    test_anomalies.insert(5, "predicted_ton_before_adjust", np.asarray(test_pred_raw, dtype=float).round(3))
     test_summary = metric.summarize(test_anomalies)
     print(f"  test {utils.format_summary(test_summary)}")
 
@@ -90,7 +90,7 @@ def run(config_path: Path | None = None) -> dict:
     }
     utils.save_json(metrics, results_dir / "metrics.json")
     utils.save_csv(test_anomalies, results_dir / "test_anomalies.csv")
-    utils.save_csv(test_anomalies[test_anomalies["심각도"] != "정상"].sort_values("z_score"),
+    utils.save_csv(test_anomalies[test_anomalies["심각도"] != "정상"].sort_values("deviation_score"),
                    results_dir / "test_anomalies_flagged.csv")
     utils.save_csv(final_model.feature_importance(final_data.feature_cols),
                    results_dir / "feature_importance.csv")

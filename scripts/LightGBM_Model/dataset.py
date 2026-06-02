@@ -1,8 +1,15 @@
-"""LightGBM 전용 데이터셋/피처 파이프라인.
+"""데이터 로딩 + 피처 생성 파이프라인.
 
-이 모듈은 상위 공용 코드를 쓰지 않고 LightGBM 폴더 안에서 독립적으로 동작한다.
-시간 순서가 있는 일별 수도 사용량 예측 문제이므로, 피처는 모두 해당 날짜 이전에
-알 수 있는 값만 사용한다. 최종 test 모델은 train+valid를 과거 학습 구간으로 사용한다.
+'한 역의 하루'(역, 날짜)가 한 행인 시계열 예측이다.
+모든 피처는 해당 날짜 '이전'에 알 수 있는 값만 쓴다(미래 정보 누수 방지).
+최종 test 모델은 train+valid 를 과거 학습 구간으로 쓴다.
+
+피처 이름은 전문용어 대신 자기설명적으로 지었다. 예)
+  usage_1days_ago        = 1일 전 사용량
+  usage_avg_last7days    = 최근 7일 사용량 평균
+  riders_std_last2days   = 최근 2일 승객수 표준편차
+  bill_daily_avg         = 청구서 기반 그 달 일평균 사용량
+  station_month_typical  = 그 역이 그 달에 평소 쓰는 양(중앙값)
 """
 
 from __future__ import annotations
@@ -14,14 +21,14 @@ import numpy as np
 import pandas as pd
 
 
-TARGET = "일사용량_톤"   # 예측 타겟 컬럼명
+TARGET = "일사용량_톤"   # 예측 대상 컬럼
 
 
 @dataclass
 class PreparedData:
-    """피처 생성이 끝난 데이터를 담는 묶음.
+    """피처 생성이 끝난 데이터 묶음.
 
-    frame            : 전체 행(train/valid/test) + 모든 피처가 들어있는 DataFrame
+    frame            : 전체 행(train/valid/test) + 모든 피처가 든 DataFrame
     feature_cols     : 모델 입력으로 쓸 피처 컬럼 이름들
     categorical_cols : 그중 범주형으로 다룰 컬럼들 (LightGBM 이 직접 처리)
     """
@@ -31,18 +38,17 @@ class PreparedData:
 
 
 def prepare_data(cfg: dict, fit_splits: tuple[str, ...]) -> PreparedData:
-    """CSV 로딩부터 피처 생성까지 수행한다.
+    """CSV 로딩부터 피처 생성까지 한 번에 수행한다.
 
-    fit_splits는 학습에 허용된 과거 split이다. train 평가용 valid 모델은 ("train",),
-    최종 test 모델은 ("train", "valid")를 사용한다.
+    fit_splits : 학습에 허용된 과거 구간. 검증모델은 ("train",), 최종모델은 ("train","valid").
     """
-    df = _load_ai_splits(cfg)
+    df = _load_splits(cfg)
     df = _merge_calendar(df, cfg)
     df = _merge_bill_baseline(df, cfg)
-    df = _add_time_features(df)
-    df = _add_lag_rolling_features(df, cfg)
-    df = _add_fit_period_statistics(df, fit_splits)
-    df = _finalize_missing_values(df)
+    df = _add_calendar_cycle_features(df)
+    df = _add_history_features(df, cfg)
+    df = _add_typical_level_features(df, fit_splits)
+    df = _fill_missing(df)
 
     categorical_cols = ["고객번호", "사업소명", "역명", "고지서_성명"]
     for col in categorical_cols:
@@ -58,12 +64,15 @@ def prepare_data(cfg: dict, fit_splits: tuple[str, ...]) -> PreparedData:
 
 
 def training_mask(df: pd.DataFrame, splits: tuple[str, ...], cfg: dict) -> pd.Series:
-    """학습에 사용할 row mask. 과거 split 중 명백한 오류/극단값은 제외한다."""
-    mask = df["split"].isin(splits)
+    """학습에 쓸 행을 True/False 로 표시한다. 과거 구간 중 명백한 오류·극단값은 제외.
+
+    역별로 [Q1 - k*IQR, Q3 + k*IQR] 범위를 벗어나면 빼고, 음수 사용량도 뺀다.
+    """
+    in_splits = df["split"].isin(splits)
     keep = pd.Series(False, index=df.index)
     k = float(cfg["features"]["outlier_iqr_k"])
     drop_negative = bool(cfg["features"]["drop_negative"])
-    for _, idx in df[mask].groupby("고객번호").groups.items():
+    for _, idx in df[in_splits].groupby("고객번호").groups.items():
         values = df.loc[idx, TARGET]
         q1, q3 = values.quantile(0.25), values.quantile(0.75)
         iqr = q3 - q1
@@ -76,7 +85,7 @@ def training_mask(df: pd.DataFrame, splits: tuple[str, ...], cfg: dict) -> pd.Se
 
 
 def split_xy(prepared: PreparedData, mask: pd.Series):
-    """mask 가 True 인 행만 골라 학습용 (X 피처, y 타겟) 으로 나눈다."""
+    """표시된 행만 골라 (X 피처, y 정답) 으로 나눈다."""
     df = prepared.frame.loc[mask]
     X = df[prepared.feature_cols]
     y = df[TARGET].astype(float)
@@ -84,20 +93,20 @@ def split_xy(prepared: PreparedData, mask: pd.Series):
 
 
 def split_meta(prepared: PreparedData, split: str) -> pd.DataFrame:
-    """특정 split(valid/test)의 식별·실측 정보(고객번호·역명·날짜·실제사용량)만 뽑는다."""
+    """특정 구간(valid/test)의 식별·정답 정보(고객번호·역명·날짜·실제사용량)만 뽑는다."""
     cols = ["고객번호", "역명", "날짜", TARGET]
     return prepared.frame.loc[prepared.frame["split"] == split, cols].reset_index(drop=True)
 
 
 def split_features(prepared: PreparedData, split: str) -> pd.DataFrame:
-    """특정 split(valid/test)의 피처 행렬 X 만 뽑는다 (예측 입력용)."""
+    """특정 구간(valid/test)의 피처 행렬 X 만 뽑는다(예측 입력용)."""
     return prepared.frame.loc[prepared.frame["split"] == split, prepared.feature_cols].reset_index(drop=True)
 
 
-def _load_ai_splits(cfg: dict) -> pd.DataFrame:
-    """train/valid/test CSV 를 split 태그와 함께 하나로 합친다 (중복 제거 + 역·날짜순 정렬).
+def _load_splits(cfg: dict) -> pd.DataFrame:
+    """train/valid/test CSV 를 구간 표시(split)와 함께 합친다(중복 제거 + 역·날짜순 정렬).
 
-    lag/이동통계가 분할 경계를 넘어 직전 값을 참조할 수 있도록 따로 계산하지 않고 합친다.
+    과거값 참조 피처가 구간 경계를 넘나들 수 있도록 따로 계산하지 않고 합쳐서 만든다.
     """
     frames = []
     for split in ("train", "valid", "test"):
@@ -114,7 +123,7 @@ def _load_ai_splits(cfg: dict) -> pd.DataFrame:
 
 
 def _merge_calendar(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
-    """날짜인덱스.csv 를 붙여 달력 피처(월/요일/주말/공휴일/휴무일/징검다리)를 추가한다."""
+    """날짜인덱스.csv 를 붙여 달력 정보(월/요일/주말/공휴일/휴무일/징검다리)를 추가한다."""
     cal = pd.read_csv(cfg["data"]["calendar"], encoding="utf-8-sig", parse_dates=["날짜"])
     cal = cal[["날짜", "월", "요일_숫자", "주말", "공휴일", "휴무일", "징검다리"]]
     out = df.merge(cal, on="날짜", how="left")
@@ -124,7 +133,11 @@ def _merge_calendar(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
 
 
 def _merge_bill_baseline(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
-    """격월 청구서를 고객번호-월 단위 일평균 baseline으로 변환해 붙인다."""
+    """격월 청구서를 (고객번호, 월)별 '하루 평균 사용량'으로 바꿔 붙인다 → bill_daily_avg.
+
+    청구서는 두 달 합계라, 월평균(=합계/포함월수)을 다시 30.4(한 달 평균 일수)로 나눠
+    하루치로 환산한다. 같은 달 여러 해 값은 중앙값으로 묶어 평소 수준을 만든다.
+    """
     bills = pd.read_csv(cfg["data"]["bills"], encoding="utf-8-sig")
     bills = bills[
         bills["포함월수"].notna()
@@ -132,122 +145,102 @@ def _merge_bill_baseline(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
         & bills["격월사용량_톤"].notna()
     ].copy()
     bills["monthly_ton"] = bills["격월사용량_톤"] / bills["포함월수"]
-    bills["start_m"] = pd.to_datetime(
-        bills["시작연월"].astype(str), format="%Y-%m", errors="coerce"
-    ).dt.month
-    bills["end_m"] = pd.to_datetime(
-        bills["종료연월"].astype(str), format="%Y-%m", errors="coerce"
-    ).dt.month
+    bills["start_month"] = pd.to_datetime(bills["시작연월"].astype(str), format="%Y-%m", errors="coerce").dt.month
+    bills["end_month"] = pd.to_datetime(bills["종료연월"].astype(str), format="%Y-%m", errors="coerce").dt.month
 
     records: list[tuple[int, int, float]] = []
     for row in bills.itertuples(index=False):
-        for month in {row.start_m, row.end_m}:
+        for month in {row.start_month, row.end_month}:
             if pd.notna(month):
                 records.append((row.고객번호, int(month), float(row.monthly_ton) / 30.4))
-    baseline = pd.DataFrame(records, columns=["고객번호", "월", "bill_daily"])
-    baseline = baseline.groupby(["고객번호", "월"], as_index=False)["bill_daily"].median()
+    baseline = pd.DataFrame(records, columns=["고객번호", "월", "bill_daily_avg"])
+    baseline = baseline.groupby(["고객번호", "월"], as_index=False)["bill_daily_avg"].median()
     return df.merge(baseline, on=["고객번호", "월"], how="left")
 
 
-def _add_time_features(df: pd.DataFrame) -> pd.DataFrame:
-    """월/요일/일/연중일을 sin·cos 로 인코딩한다(주기성: 12월↔1월, 일↔월요일을 가깝게 연결)."""
+def _add_calendar_cycle_features(df: pd.DataFrame) -> pd.DataFrame:
+    """월/요일/일/연중일을 sin·cos 로 바꾼다(12월↔1월, 일↔월요일을 가깝게 연결)."""
     out = df.copy()
-    out["day"] = out["날짜"].dt.day
+    out["dayofmonth"] = out["날짜"].dt.day
     out["dayofyear"] = out["날짜"].dt.dayofyear
-    periodic = [("월", 12), ("요일_숫자", 7), ("day", 31), ("dayofyear", 366)]
-    for col, period in periodic:
-        out[f"{col}_sin"] = np.sin(2 * np.pi * out[col] / period)
-        out[f"{col}_cos"] = np.cos(2 * np.pi * out[col] / period)
+    # (출력이름, 원본컬럼, 주기길이)
+    cycles = [("month", "월", 12), ("weekday", "요일_숫자", 7),
+              ("dayofmonth", "dayofmonth", 31), ("dayofyear", "dayofyear", 366)]
+    for name, src, period in cycles:
+        out[f"{name}_sin"] = np.sin(2 * np.pi * out[src] / period)
+        out[f"{name}_cos"] = np.cos(2 * np.pi * out[src] / period)
     return out
 
 
-def _add_lag_rolling_features(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
-    """역별 과거 사용량·승객수의 lag / 이동통계 / 비율·차이 피처를 만든다.
+def _add_history_features(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
+    """역별 과거 사용량·승객수의 '며칠 전 값 / 최근 통계 / 비율·차이' 피처를 만든다.
 
-    모두 shift(과거로 밀기) 후 계산하므로 '해당 날짜 이전' 정보만 쓴다(누수 없음).
-    config 의 usage_lags / passenger_lags / rolling_windows 가 어떤 피처를 만들지 결정.
+    모두 과거로 밀어(shift) 계산하므로 '해당 날짜 이전' 값만 쓴다(누수 없음).
+    config 의 usage_lags / passenger_lags / rolling_windows 가 어떤 피처를 만들지 정한다.
     """
     out = df.copy()
-    group = out.groupby("고객번호", sort=False)
-    usage = group[TARGET]
-    passenger = group["총승객수"]
+    by_station = out.groupby("고객번호", sort=False)
+    usage = by_station[TARGET]
+    riders = by_station["총승객수"]
 
     features: dict[str, pd.Series] = {}
-    for lag in cfg["features"]["usage_lags"]:
-        lag = int(lag)
-        features[f"u_lag_{lag}"] = usage.shift(lag)
-    for lag in cfg["features"]["passenger_lags"]:
-        lag = int(lag)
-        features[f"p_lag_{lag}"] = passenger.shift(lag)
+    for n in cfg["features"]["usage_lags"]:          # n일 전 사용량
+        n = int(n)
+        features[f"usage_{n}days_ago"] = usage.shift(n)
+    for n in cfg["features"]["passenger_lags"]:      # n일 전 승객수
+        n = int(n)
+        features[f"riders_{n}days_ago"] = riders.shift(n)
 
-    shifted_usage = usage.shift(1)
-    shifted_passenger = passenger.shift(1)
-    for window in cfg["features"]["rolling_windows"]:
-        window = int(window)
-        roll_u = shifted_usage.groupby(out["고객번호"]).rolling(window, min_periods=1)
-        features[f"u_mean_{window}"] = roll_u.mean().reset_index(level=0, drop=True)
-        features[f"u_median_{window}"] = roll_u.median().reset_index(level=0, drop=True)
-        features[f"u_std_{window}"] = roll_u.std().reset_index(level=0, drop=True)
-        features[f"u_min_{window}"] = roll_u.min().reset_index(level=0, drop=True)
-        features[f"u_max_{window}"] = roll_u.max().reset_index(level=0, drop=True)
-
-        roll_p = shifted_passenger.groupby(out["고객번호"]).rolling(window, min_periods=1)
-        features[f"p_mean_{window}"] = roll_p.mean().reset_index(level=0, drop=True)
-        features[f"p_std_{window}"] = roll_p.std().reset_index(level=0, drop=True)
+    usage_until_yesterday = usage.shift(1)           # 오늘 값을 빼려고 하루 민다
+    riders_until_yesterday = riders.shift(1)
+    for w in cfg["features"]["rolling_windows"]:     # 최근 w일 통계
+        w = int(w)
+        ru = usage_until_yesterday.groupby(out["고객번호"]).rolling(w, min_periods=1)
+        features[f"usage_avg_last{w}days"]    = ru.mean().reset_index(level=0, drop=True)
+        features[f"usage_median_last{w}days"] = ru.median().reset_index(level=0, drop=True)
+        features[f"usage_std_last{w}days"]    = ru.std().reset_index(level=0, drop=True)
+        features[f"usage_min_last{w}days"]    = ru.min().reset_index(level=0, drop=True)
+        features[f"usage_max_last{w}days"]    = ru.max().reset_index(level=0, drop=True)
+        rp = riders_until_yesterday.groupby(out["고객번호"]).rolling(w, min_periods=1)
+        features[f"riders_avg_last{w}days"]   = rp.mean().reset_index(level=0, drop=True)
+        features[f"riders_std_last{w}days"]   = rp.std().reset_index(level=0, drop=True)
 
     out = pd.concat([out, pd.DataFrame(features, index=out.index)], axis=1)
-    out["days_since_prev"] = group["날짜"].diff().dt.days.fillna(30).clip(1, 30)
-    out["p_ratio_lag7"] = out["총승객수"] / out["p_lag_7"].replace(0, np.nan)
-    out["u_ratio_lag7"] = out["u_lag_1"] / out["u_lag_7"].replace(0, np.nan)
-    out["u_delta_lag1_lag7"] = out["u_lag_1"] - out["u_lag_7"]
-    out["p_delta_today_lag7"] = out["총승객수"] - out["p_lag_7"]
+    out["days_since_last_record"] = by_station["날짜"].diff().dt.days.fillna(30).clip(1, 30)
+    out["riders_today_vs_7days_ago_ratio"] = out["총승객수"] / out["riders_7days_ago"].replace(0, np.nan)
+    out["usage_1day_vs_7days_ago_ratio"] = out["usage_1days_ago"] / out["usage_7days_ago"].replace(0, np.nan)
+    out["usage_1day_minus_7days_ago"] = out["usage_1days_ago"] - out["usage_7days_ago"]
+    out["riders_today_minus_7days_ago"] = out["총승객수"] - out["riders_7days_ago"]
     return out
 
 
-def _add_fit_period_statistics(df: pd.DataFrame, fit_splits: tuple[str, ...]) -> pd.DataFrame:
-    """학습 구간(fit_splits)의 역×월·역×요일 중앙값 baseline 을 만들어 전 행에 붙인다.
+def _add_typical_level_features(df: pd.DataFrame, fit_splits: tuple[str, ...]) -> pd.DataFrame:
+    """'이 역이 이 달/이 요일에 평소 얼마 쓰나'(중앙값)를 만들어 모든 행에 붙인다.
 
-    극단치를 뺀(clean) 값으로 계산하며, 역별 값이 없을 때 쓸 전역(월/요일) 중앙값도 함께 둔다.
-    학습 구간 통계만 쓰므로 test 에 미래정보가 새지 않는다.
+    학습 구간에서 극단치를 뺀 값으로 계산하므로 test 에 미래정보가 새지 않는다.
+    역별 값이 없을 때 쓸 전체(월/요일) 평소값도 함께 만든다.
     """
     fit = df[df["split"].isin(fit_splits)].copy()
-    keep = _iqr_keep_for_stats(fit)
-    clean = fit[keep]
+    clean = fit[_normal_rows(fit)]
 
-    month_med = (
-        clean.groupby(["고객번호", "월"])[TARGET]
-        .median()
-        .rename("fit_month_median")
-        .reset_index()
-    )
-    dow_med = (
-        clean.groupby(["고객번호", "요일_숫자"])[TARGET]
-        .median()
-        .rename("fit_dow_median")
-        .reset_index()
-    )
-    global_month = (
-        clean.groupby("월")[TARGET]
-        .median()
-        .rename("global_month_median")
-        .reset_index()
-    )
-    global_dow = (
-        clean.groupby("요일_숫자")[TARGET]
-        .median()
-        .rename("global_dow_median")
-        .reset_index()
-    )
+    station_month = (clean.groupby(["고객번호", "월"])[TARGET].median()
+                     .rename("station_month_typical").reset_index())
+    station_weekday = (clean.groupby(["고객번호", "요일_숫자"])[TARGET].median()
+                       .rename("station_weekday_typical").reset_index())
+    all_month = (clean.groupby("월")[TARGET].median()
+                 .rename("all_month_typical").reset_index())
+    all_weekday = (clean.groupby("요일_숫자")[TARGET].median()
+                   .rename("all_weekday_typical").reset_index())
 
-    out = df.merge(month_med, on=["고객번호", "월"], how="left")
-    out = out.merge(dow_med, on=["고객번호", "요일_숫자"], how="left")
-    out = out.merge(global_month, on="월", how="left")
-    out = out.merge(global_dow, on="요일_숫자", how="left")
+    out = df.merge(station_month, on=["고객번호", "월"], how="left")
+    out = out.merge(station_weekday, on=["고객번호", "요일_숫자"], how="left")
+    out = out.merge(all_month, on="월", how="left")
+    out = out.merge(all_weekday, on="요일_숫자", how="left")
     return out
 
 
-def _iqr_keep_for_stats(df: pd.DataFrame) -> pd.Series:
-    """baseline 통계 계산에 쓸 정상 행 mask(역별 IQR×3 안 + 음수 제외) — 극단치가 중앙값을 흔들지 않게."""
+def _normal_rows(df: pd.DataFrame) -> pd.Series:
+    """평소수준 통계 계산에 쓸 정상 행 표시(역별 IQR×3 범위 안 + 음수 제외) — 극단치가 중앙값을 흔들지 않게."""
     keep = pd.Series(True, index=df.index)
     for _, idx in df.groupby("고객번호").groups.items():
         values = df.loc[idx, TARGET]
@@ -257,16 +250,21 @@ def _iqr_keep_for_stats(df: pd.DataFrame) -> pd.Series:
     return keep
 
 
-def _finalize_missing_values(df: pd.DataFrame) -> pd.DataFrame:
-    """결측 피처를 단계적으로 메운다: bill_daily 는 역월→전역월→train중앙값, 핵심 lag 는 bill_daily 로."""
+def _fill_missing(df: pd.DataFrame) -> pd.DataFrame:
+    """결측 피처를 단계적으로 메운다.
+
+    bill_daily_avg : 역×월 평소값 → 전체×월 평소값 → train 중앙값 순으로 보충.
+    핵심 과거값 피처 : bill_daily_avg(그 역의 평소 수준)로 보충.
+    """
     out = df.copy()
-    out["bill_daily"] = (
-        out["bill_daily"]
-        .fillna(out["fit_month_median"])
-        .fillna(out["global_month_median"])
+    out["bill_daily_avg"] = (
+        out["bill_daily_avg"]
+        .fillna(out["station_month_typical"])
+        .fillna(out["all_month_typical"])
         .fillna(out[TARGET].where(out["split"] == "train").median())
     )
-    for col in ["u_lag_1", "u_lag_2", "u_lag_3", "u_lag_7", "u_mean_7", "u_median_7"]:
+    for col in ["usage_1days_ago", "usage_2days_ago", "usage_3days_ago", "usage_7days_ago",
+                "usage_avg_last7days", "usage_median_last7days"]:
         if col in out:
-            out[col] = out[col].fillna(out["bill_daily"])
+            out[col] = out[col].fillna(out["bill_daily_avg"])
     return out

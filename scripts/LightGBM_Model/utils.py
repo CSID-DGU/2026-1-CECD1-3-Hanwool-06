@@ -51,7 +51,7 @@ def format_summary(summary: dict) -> str:
         f"rmse={summary['rmse']:.4f} "
         f"rmse_without_data_errors={summary['rmse_without_data_errors']:.4f} "
         f"rmse_normal_only={summary['rmse_normal_only']:.4f} "
-        f"non_alert_diagnostic={summary['rmse_non_alert_diagnostic']:.4f} "
+        f"rmse_excluding_alerts={summary['rmse_excluding_alerts']:.4f} "
         f"경고={summary['경고']} 주의={summary['주의']}"
     )
 
@@ -128,9 +128,9 @@ def save_scatter_plot(anomalies: pd.DataFrame, warn_q: float, alert_q: float, pa
     matplotlib.use("Agg")   # 화면 없이 파일로만 저장
     import matplotlib.pyplot as plt
 
-    df = anomalies[~anomalies["data_error_candidate"]]
+    df = anomalies[~anomalies["likely_data_error"]]
     actual = df["일사용량_톤"].to_numpy(dtype=float)
-    pred = df["pred_ton"].to_numpy(dtype=float)
+    pred = df["predicted_ton"].to_numpy(dtype=float)
     abs_resid = np.abs(actual - pred)
     d_warn = float(np.quantile(abs_resid, warn_q))    # 잔차 q95
     d_alert = float(np.quantile(abs_resid, alert_q))  # 잔차 q99
