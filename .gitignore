@@ -39,6 +39,8 @@ node_modules/
 
 # Build artifacts
 dist/
+front/dist/
+front/demo-dist/
 build/
 *.egg-info/
 
