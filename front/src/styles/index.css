@@ -202,8 +202,14 @@ a {
 }
 
 .head-status strong {
-  color: var(--navy);
+  color: var(--muted);
   font-size: 18px;
+}
+
+.head-status .head-collected {
+  font-weight: 500;
+  font-size: 12px;
+  color: var(--faint);
 }
 
 .summary-grid {

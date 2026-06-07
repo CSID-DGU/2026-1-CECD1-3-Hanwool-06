@@ -9,8 +9,8 @@ export default function AppHeader({ logo }) {
         </span>
       </div>
       <nav className="topnav" aria-label="화면 구분">
-        <a className="is-active">전체 현황</a>
-        <a>역 상세</a>
+        <a className="is-active" href="#/">전체 현황</a>
+        <a href="#/detail">역 상세</a>
       </nav>
     </header>
   );

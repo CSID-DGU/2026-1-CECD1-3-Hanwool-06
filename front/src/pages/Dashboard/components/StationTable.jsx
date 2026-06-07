@@ -14,7 +14,7 @@ export default function StationTable({ stations }) {
             <tr>
               <th>역명</th>
               <th>호선</th>
-              <th>수도사업소</th>
+              <th>영업사업소</th>
               <th>위험도</th>
               <th>일 사용량</th>
               <th>예측대비</th>

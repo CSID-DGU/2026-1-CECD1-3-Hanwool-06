@@ -100,7 +100,6 @@ function routeLabelPosition(line) {
     6: { x: 724, y: 486 },
     7: { x: 884, y: 88 },
     8: { x: 928, y: 304 },
-    9: { x: 930, y: 522 },
   };
   return positions[line];
 }

@@ -15,9 +15,9 @@ export default function FilterPanel({
       <SectionTitle title="필터링" />
       <div className="control-panel-body">
         <div className="field">
-          <label htmlFor="office-filter">수도사업소</label>
+          <label htmlFor="office-filter">영업사업소</label>
           <select id="office-filter" value={selectedOffice} onChange={(event) => setSelectedOffice(event.target.value)}>
-            <option value="all">전체 수도사업소</option>
+            <option value="all">전체 영업사업소</option>
             {offices.map((office) => (
               <option value={office} key={office}>
                 {office}
