@@ -1,0 +1,902 @@
+.dt-root {
+  --navy: #283891;
+  --navy-deep: #17288b;
+  --ink: #1f2430;
+  --muted: #5b6270;
+  --faint: #8a8f9c;
+  --line: #e6e9f0;
+  --line-soft: #eef1f6;
+  --bg: #f4f6fa;
+  --card: #ffffff;
+  --head: #eef1f8;
+  --gold: #b08a4f;
+  --ok: #16a34a;
+  --warn: #f59e0b;
+  --alert: #dc2626;
+  --ok-bg: #e7f6ee;
+  --warn-bg: #fef2e0;
+  --alert-bg: #fceaea;
+  --shadow: 0 1px 2px rgba(20, 30, 60, 0.04), 0 6px 18px rgba(20, 30, 60, 0.06);
+  --radius: 14px;
+
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: Pretendard, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+/* ── Top bar ─────────────────────────────────────────── */
+.dt-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 60px;
+  padding: 0 28px;
+  background: #fff;
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+.dt-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.dt-brand-logo {
+  height: 30px;
+  width: auto;
+  display: block;
+}
+.dt-brand-divider {
+  width: 1px;
+  height: 18px;
+  background: var(--line);
+}
+.dt-brand-text {
+  font-size: 15px;
+  color: var(--muted);
+}
+.dt-brand-text strong {
+  color: var(--ink);
+  font-size: 16px;
+}
+.dt-topnav {
+  display: flex;
+  gap: 4px;
+}
+.dt-topnav a {
+  padding: 7px 14px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--muted);
+  cursor: pointer;
+}
+.dt-topnav a.is-active {
+  background: var(--navy);
+  color: #fff;
+}
+
+/* ── Demo switcher ───────────────────────────────────── */
+.dt-demo {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  flex-wrap: wrap;
+  max-width: 1160px; /* 카드 영역과 동일 폭 */
+  margin: 0 auto;
+  padding: 14px 28px 0;
+}
+.dt-demo-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--faint);
+  letter-spacing: 0.02em;
+}
+.dt-demo-select {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 7px 12px;
+  font-size: 13px;
+  color: var(--ink);
+  background: #fff;
+  min-width: 150px;
+}
+.dt-demo-note {
+  font-size: 11.5px;
+  color: var(--faint);
+}
+
+/* ── Page layout ─────────────────────────────────────── */
+.dt-page {
+  max-width: 1160px;
+  margin: 0 auto;
+  padding: 18px 28px 60px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+/* 좌/우 칸을 직접 배치 — 큰 카드를 한 칸에 몰아 높이 균형 */
+.dt-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  align-items: stretch; /* 두 칸 높이를 같게 */
+}
+.dt-col {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+/* 짧은 칸의 마지막 카드가 남는 높이를 채워 바닥을 정확히 맞춤 */
+.dt-col > :last-child {
+  flex-grow: 1;
+}
+/* 늘어난 카드(기본정보)의 내용을 세로 중앙 정렬 */
+.dt-fill-center {
+  display: flex;
+  flex-direction: column;
+}
+.dt-fill-center .dt-card-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+@media (max-width: 880px) {
+  .dt-cols {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 880px) {
+  .dt-grid-2 {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── Station header ──────────────────────────────────── */
+.dt-station {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 22px;
+}
+.dt-station-info {
+  display: flex;
+  flex-direction: column;
+}
+.dt-station-lines {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.dt-line-btn {
+  border: none;
+  cursor: pointer;
+}
+.dt-line-btn.is-off {
+  opacity: 0.32;
+}
+.dt-line-btn.is-on {
+  box-shadow: 0 0 0 2px var(--card), 0 0 0 4px var(--navy);
+}
+.dt-line-hint {
+  font-size: 11px;
+  color: var(--faint);
+  margin-left: 2px;
+}
+.dt-station h1 {
+  margin: 0;
+  font-size: 30px;
+  letter-spacing: -0.01em;
+}
+.dt-station-cov {
+  margin: 12px 0 0;
+}
+.dt-cov {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-weight: 600;
+}
+.dt-cov--full74 {
+  background: #eaf2ff;
+  color: var(--navy);
+}
+.dt-cov--cut3 {
+  background: var(--warn-bg);
+  color: #9a6a08;
+}
+.dt-cov--billonly {
+  background: #f0f1f4;
+  color: var(--muted);
+}
+.dt-station-risk {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.dt-risk-date {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink);
+  background: var(--bg);
+  padding: 3px 9px;
+  border-radius: 999px;
+}
+
+/* ── Card ────────────────────────────────────────────── */
+.dt-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.dt-card-head {
+  padding: 16px 20px 0;
+}
+.dt-card-body {
+  padding: 16px 20px 20px;
+}
+.dt-sectitle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.dt-sectitle h3 {
+  margin: 0;
+  font-size: 15.5px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.dt-bullet {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: linear-gradient(135deg, var(--gold), var(--navy));
+}
+.dt-sectitle-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.dt-deltachip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12.5px;
+  color: var(--muted);
+  background: var(--bg);
+  padding: 4px 11px;
+  border-radius: 999px;
+}
+.dt-deltachip b.up {
+  color: var(--alert);
+}
+.dt-deltachip b.down {
+  color: var(--ok);
+}
+
+/* ── Key-value table ─────────────────────────────────── */
+.dt-kv {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13.5px;
+}
+.dt-kv th {
+  text-align: left;
+  width: 42%;
+  color: var(--muted);
+  font-weight: 600;
+  padding: 9px 8px 9px 0;
+  vertical-align: top;
+  border-bottom: 1px solid var(--line-soft);
+}
+.dt-kv td {
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+/* ── Risk panel ──────────────────────────────────────── */
+.dt-risk-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.dt-risk-msg {
+  font-size: 13px;
+  color: var(--muted);
+}
+.dt-risk-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.dt-stat {
+  background: var(--bg);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.dt-stat-label {
+  font-size: 11.5px;
+  color: var(--faint);
+}
+.dt-stat-value {
+  font-size: 17px;
+  font-weight: 700;
+}
+.dt-risk-hist {
+  margin-top: 16px;
+}
+.dt-risk-histcap {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--faint);
+  margin-bottom: 4px;
+}
+.dt-risk-history {
+  width: 90%;
+  margin: 0 auto;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+.dt-risk-history th {
+  text-align: left;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--faint);
+  padding: 5px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+.dt-risk-history td {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--ink);
+}
+.dt-risk-history th:nth-child(2),
+.dt-risk-history td:nth-child(2) {
+  text-align: center;
+}
+.dt-risk-history th:last-child,
+.dt-risk-history td:last-child {
+  text-align: right;
+}
+.dt-sevdot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 7px;
+  vertical-align: middle;
+}
+.dt-sevdot--ok {
+  background: var(--ok);
+}
+.dt-sevdot--warn {
+  background: var(--warn);
+}
+.dt-sevdot--alert {
+  background: var(--alert);
+}
+.dt-hist-pct--warn {
+  color: #b3700a;
+  font-weight: 700;
+}
+.dt-hist-pct--alert {
+  color: var(--alert);
+  font-weight: 700;
+}
+.dt-stat--warn .dt-stat-value {
+  color: #b3700a;
+}
+.dt-stat--alert .dt-stat-value {
+  color: var(--alert);
+}
+.dt-stat-sub {
+  font-size: 11px;
+  color: var(--faint);
+}
+
+/* ── Daily card ──────────────────────────────────────── */
+.dt-daily-date {
+  margin-bottom: 14px;
+}
+.dt-daily-sub + .dt-daily-sub {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line-soft);
+}
+.dt-daily-sub-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-start;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+.dt-daily-sub-label {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--muted);
+}
+.dt-daily-sub-val {
+  font-size: 13px;
+  color: var(--muted);
+}
+.dt-daily-sub-val strong {
+  font-size: 20px;
+  color: var(--navy);
+}
+.dt-field {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11.5px;
+  color: var(--faint);
+  font-weight: 600;
+}
+.dt-field select,
+.dt-field input {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: 13px;
+  color: var(--ink);
+  background: #fff;
+}
+.dt-daily-none {
+  font-size: 13px;
+  color: var(--warn);
+  font-weight: 600;
+}
+.dt-daily-hint {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--warn);
+  background: var(--warn-bg);
+  padding: 7px 10px;
+  border-radius: 8px;
+}
+
+/* ── Charts ──────────────────────────────────────────── */
+.dt-chart-wrap {
+  width: 100%;
+}
+.dt-chart {
+  display: block;
+}
+.dt-chart-grid {
+  stroke: var(--line-soft);
+  stroke-width: 1;
+}
+.dt-chart-axis {
+  fill: var(--faint);
+  font-size: 13px;
+}
+.dt-chart-value {
+  fill: #3f4654;
+  font-size: 11px;
+  font-weight: 600;
+}
+.dt-chart-unit {
+  fill: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* ── Badges ──────────────────────────────────────────── */
+.dt-badge {
+  display: inline-flex;
+  align-items: center;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 4px 11px;
+  font-size: 12.5px;
+  line-height: 1;
+}
+.dt-badge--sm {
+  padding: 2px 8px;
+  font-size: 11px;
+}
+.dt-badge--lg {
+  padding: 6px 14px;
+  font-size: 14px;
+}
+.dt-badge--ok {
+  background: var(--ok-bg);
+  color: var(--ok);
+}
+.dt-badge--warn {
+  background: var(--warn-bg);
+  color: #b3700a;
+}
+.dt-badge--alert {
+  background: var(--alert-bg);
+  color: var(--alert);
+}
+.dt-badge--na {
+  background: #eef0f3;
+  color: var(--faint);
+}
+
+/* ── Risk gauge ──────────────────────────────────────── */
+.dt-gauge {
+  position: relative;
+  width: 92px;
+  height: 92px;
+}
+.dt-gauge svg {
+  width: 92px;
+  height: 92px;
+}
+.dt-gauge-track {
+  fill: none;
+  stroke: #edeff4;
+  stroke-width: 9;
+}
+.dt-gauge-arc {
+  fill: none;
+  stroke-width: 9;
+  transition: stroke-dasharray 0.4s ease;
+}
+.dt-gauge--ok .dt-gauge-arc {
+  stroke: var(--ok);
+}
+.dt-gauge--warn .dt-gauge-arc {
+  stroke: var(--warn);
+}
+.dt-gauge--alert .dt-gauge-arc {
+  stroke: var(--alert);
+}
+.dt-gauge--na .dt-gauge-arc {
+  stroke: #cbd0da;
+}
+.dt-gauge-num {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+.dt-gauge-num strong {
+  font-size: 20px;
+  line-height: 1;
+}
+.dt-gauge-num small {
+  font-size: 10px;
+  color: var(--faint);
+}
+
+/* ── Tooltip ─────────────────────────────────────────── */
+.dt-tip {
+  position: relative;
+  display: inline-flex;
+  outline: none;
+}
+.dt-tip-icon {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #e7eaf2;
+  color: var(--navy);
+  font-size: 11px;
+  display: grid;
+  place-items: center;
+  cursor: help;
+}
+.dt-tip-bubble {
+  display: none;
+  position: absolute;
+  right: 0;
+  top: 22px;
+  width: max-content; /* 내용에 맞춰 폭 자동 */
+  max-width: 80vw;
+  background: var(--ink);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre; /* \n 에서만 줄바꿈, 단어 중간 잘림 없음 */
+  padding: 9px 12px;
+  border-radius: 8px;
+  z-index: 20;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+}
+.dt-tip:hover .dt-tip-bubble,
+.dt-tip:focus .dt-tip-bubble {
+  display: block;
+}
+
+/* ── Line badges (호선) ──────────────────────────────── */
+.dt-line {
+  display: inline-grid;
+  place-items: center;
+  min-width: 48px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 11px;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+}
+/* 호선 색상: 서울교통공사 공식 라인컬러(사진3) 기준 확정 */
+.dt-line--1 { background: #0052a4; }
+.dt-line--2 { background: #00a84d; }
+.dt-line--3 { background: #ef7c1c; }
+.dt-line--4 { background: #00a5de; }
+.dt-line--5 { background: #996cac; }
+.dt-line--6 { background: #cd7c2f; }
+.dt-line--7 { background: #747f00; }
+.dt-line--8 { background: #e6186c; }
+.dt-line--9 { background: #8e6e2e; }
+
+/* ── Pending / empty ─────────────────────────────────── */
+.dt-pending {
+  display: inline-block;
+  font-size: 12px;
+  color: var(--faint);
+  background: repeating-linear-gradient(-45deg, #f3f4f7, #f3f4f7 6px, #eceef2 6px, #eceef2 12px);
+  border-radius: 6px;
+  padding: 2px 8px;
+}
+.dt-empty {
+  text-align: center;
+  color: var(--muted);
+  font-size: 13.5px;
+  line-height: 1.6;
+  padding: 26px 14px;
+  background: var(--bg);
+  border-radius: 10px;
+}
+.dt-empty strong {
+  color: var(--faint);
+}
+
+/* ── Bill (사진1 재현) ───────────────────────────────── */
+.dt-bill-toolbar {
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+.dt-bimonthly {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  background: var(--warn-bg);
+  padding: 6px 11px;
+  border-radius: 8px;
+}
+.dt-bill {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 20px;
+  background: #fff;
+}
+.dt-bill-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+.dt-bill-title {
+  margin: 0 0 12px;
+  color: var(--navy);
+  font-size: 18px;
+}
+.dt-bill-meta {
+  margin: 0;
+  font-size: 15px;
+}
+.dt-bill-meta > div {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.dt-bill-meta dt {
+  color: var(--muted);
+  min-width: 44px;
+}
+.dt-bill-meta dd {
+  margin: 0;
+  font-weight: 600;
+}
+.dt-bill-idtable {
+  border-collapse: collapse;
+  font-size: 12.5px;
+  height: fit-content;
+}
+.dt-bill-idtable th,
+.dt-bill-idtable td {
+  border: 1px solid var(--line);
+  padding: 6px 12px;
+}
+.dt-bill-idtable th {
+  background: var(--head);
+  color: var(--muted);
+  font-weight: 600;
+  text-align: left;
+}
+.dt-bill-pay {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 18px 0;
+  padding: 14px 18px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fafbff;
+}
+.dt-bill-pay span {
+  font-size: 16px;
+  font-weight: 700;
+}
+.dt-bill-pay strong {
+  font-size: 26px;
+  color: var(--navy);
+}
+.dt-bill-grid {
+  width: 100%;
+  table-layout: fixed; /* 값 길이와 무관하게 컬럼 폭 고정 */
+  border-collapse: collapse;
+  font-size: 13px;
+  margin-bottom: 14px;
+  text-align: right;
+}
+.dt-bill-grid th,
+.dt-bill-grid td {
+  border: 1px solid var(--line);
+  padding: 8px 12px;
+}
+.dt-bill-grid thead th {
+  background: var(--navy);
+  color: #fff;
+  text-align: center;
+  font-weight: 600;
+}
+.dt-bill-grid tbody th {
+  background: var(--head);
+  color: var(--muted);
+  text-align: center;
+  font-weight: 600;
+}
+.dt-bill-grid .dt-bill-sum td,
+.dt-bill-grid .dt-bill-sum th {
+  background: #f6f8ff;
+  font-weight: 700;
+}
+.dt-bill-period {
+  font-weight: 700;
+  font-size: 14px;
+  margin: 6px 0 12px;
+}
+.dt-bill-cols {
+  display: grid;
+  grid-template-columns: 1fr 1.2fr;
+  gap: 14px;
+}
+/* cols 안의 좌측 표는 우측 표와 바닥을 맞추기 위해 하단 여백 제거 */
+.dt-bill-cols .dt-bill-grid {
+  margin-bottom: 0;
+}
+@media (max-width: 760px) {
+  .dt-bill-cols {
+    grid-template-columns: 1fr;
+  }
+}
+.dt-bill-kv {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+  table-layout: fixed; /* 라벨/값 칸 폭을 내용과 무관하게 좌우 대칭으로 고정 */
+}
+.dt-bill-kv th,
+.dt-bill-kv td {
+  border: 1px solid var(--line);
+  padding: 7px 10px;
+}
+.dt-bill-kv th {
+  width: 30%; /* 라벨 칸 (1·3번) */
+  background: var(--head);
+  color: var(--muted);
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+}
+.dt-bill-kv td {
+  width: 20%; /* 값 칸 (2·4번) */
+  text-align: right;
+}
+.dt-bill-charts {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin-top: 16px;
+}
+.dt-bill-trend {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+.dt-yoy {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ── YoY ─────────────────────────────────────────────── */
+.dt-yoy-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 0;
+}
+.dt-yoy-card {
+  flex: 1;
+  min-width: 120px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.dt-yoy-card--cur {
+  border-color: var(--navy);
+  background: #f6f8ff;
+}
+.dt-yoy-year {
+  font-size: 12px;
+  color: var(--faint);
+}
+.dt-yoy-card strong {
+  font-size: 18px;
+}
+.dt-yoy-delta {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 4px;
+  min-width: 110px;
+  border-radius: 10px;
+  background: var(--bg);
+  padding: 12px;
+}
+.dt-yoy-delta span {
+  font-size: 12px;
+  color: var(--faint);
+}
+.dt-yoy-delta strong {
+  font-size: 20px;
+}
+.dt-yoy-delta strong.up {
+  color: var(--alert);
+}
+.dt-yoy-delta strong.down {
+  color: var(--ok);
+}
+
