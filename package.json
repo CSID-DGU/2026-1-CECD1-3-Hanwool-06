@@ -4,6 +4,7 @@
   "scripts": {
     "dev": "npm run dev --workspace front",
     "dev:front": "npm run dev --workspace front",
+    "dev:api": "uvicorn back.api.main:app --reload --port 8000",
     "install:all": "npm install --workspaces"
   },
   "workspaces": [
