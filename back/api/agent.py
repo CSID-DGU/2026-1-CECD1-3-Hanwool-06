@@ -90,15 +90,17 @@ def daily_summary(date: str | None = None) -> dict:
                 {
                     "역명": x["역명"],
                     "심각도": x["심각도"],
-                    "one_line": f"예측 대비 {x['pct']:+d}% ({x['방향']}), deviation {x['deviation_score']}"
+                    "pct": x["pct"],
+                    "dir": x["방향"],
+                    "err_ton": x["error_ton"],
+                    "action": "현장/계량 확인 필요"
                     + (" · 데이터오류 의심" if x["likely_data_error"] else ""),
-                    "action": "현장/계량 확인 필요",
                 }
                 for x in items
             ],
             "actions": [
                 f"경고 {n_alert}건 우선 점검",
-                "deviation 절대값이 큰 역부터 원인 분석",
+                "이탈 폭이 큰 역부터 원인 분석",
             ],
             "calendar": cal,
             "generated_by": "rule (OPENAI_API_KEY 미설정)",
@@ -152,13 +154,28 @@ def daily_summary(date: str | None = None) -> dict:
     text = _respond(instructions, prompt)
     parsed = _parse_json(text)
     parsed.setdefault("headline", f"{date} 기준 경고 {n_alert}건 · 주의 {n_warn}건")
-    parsed.setdefault("items", [])
     parsed.setdefault("actions", [])
+    # 수치는 실데이터로 고정하고, 역별 권장조치(action)만 모델 출력에서 가져온다.
+    ai_action = {
+        it.get("역명"): it.get("action")
+        for it in parsed.get("items", [])
+        if isinstance(it, dict)
+    }
     return {
         "기준일": date,
         "headline": parsed["headline"],
         "counts": {"경고": n_alert, "주의": n_warn, "총": len(items)},
-        "items": parsed["items"],
+        "items": [
+            {
+                "역명": x["역명"],
+                "심각도": x["심각도"],
+                "pct": x["pct"],
+                "dir": x["방향"],
+                "err_ton": x["error_ton"],
+                "action": ai_action.get(x["역명"]) or "현장/계량 확인 필요",
+            }
+            for x in items
+        ],
         "actions": parsed["actions"],
         "calendar": cal,
         "generated_by": config.OPENAI_MODEL,

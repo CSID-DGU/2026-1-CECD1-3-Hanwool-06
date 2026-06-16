@@ -25,8 +25,9 @@ ALERT_TO = os.getenv("ALERT_TO", "")  # 기본 수신처(콤마로 다중 가능
 TODAY_OVERRIDE = os.getenv("TODAY_OVERRIDE", "").strip()
 
 # ── 데이터 경로 ────────────────────────────────────────────────────
-RESULTS = ROOT / "back" / "ml" / "lightgbm" / "results"
-ANOMALIES_FLAGGED = RESULTS / "test_anomalies_flagged.csv"
+# 위험도 실데이터: risk.json 과 동일한 라이브 소스(06-13까지)를 본다.
+RESULTS = ROOT / "analysis" / "risk_snapshot" / "scripts" / "LightGBM_Model" / "results"
+ANOMALIES_FLAGGED = RESULTS / "test_anomalies.csv"
 ANOMALIES_ALL = RESULTS / "test_anomalies.csv"
 DATE_INDEX = ROOT / "data" / "processed" / "date_index.csv"
 BILLS_CLEAN = ROOT / "data" / "billing" / "bills_clean.csv"

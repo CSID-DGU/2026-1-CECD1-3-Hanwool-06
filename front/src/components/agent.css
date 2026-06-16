@@ -177,10 +177,17 @@
   font-size: 13px;
   color: var(--muted);
 }
+/* 이상 방향 색(뮤트): 과다 ▲ 다크레드 · 과소 ▼ 다크블루 */
+.ag-metric--up {
+  color: #9c3b3b;
+}
+.ag-metric--down {
+  color: #37598c;
+}
 .ag-item-action {
   margin: 6px 0 0;
   font-size: 13px;
-  color: var(--navy);
+  color: var(--ink);
 }
 
 .ag-item-btns {

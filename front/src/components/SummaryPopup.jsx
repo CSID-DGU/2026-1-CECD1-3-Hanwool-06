@@ -7,6 +7,18 @@ import "./agent.css";
 
 const SEV_TONE = { 경고: "alert", 주의: "warn", 정상: "ok" };
 
+// 표시용: "왕십리역5" → "왕십리역 5호선" (역명에 붙은 호선 숫자를 분리). API 호출엔 원본 역명을 그대로 쓴다.
+function formatStationName(name) {
+  const m = /^(.+역)(\d+)$/.exec(name);
+  return m ? `${m[1]} ${m[2]}호선` : name;
+}
+
+// source 에 출처명+URL 이 섞여 와도(예: "서울시설공단 … https://…") 실제 URL 만 뽑는다.
+function extractUrl(text) {
+  const m = /https?:\/\/[^\s]+/.exec(text || "");
+  return m ? m[0] : null;
+}
+
 export default function SummaryPopup() {
   const [open, setOpen] = useState(true);
   const [state, setState] = useState({ loading: true, error: null, data: null });
@@ -102,6 +114,23 @@ function SummaryBody({ data }) {
   );
 }
 
+// 이상 수치 한 줄: 과다▲/과소▼ + 수치만 bold. deviation 은 표시하지 않는다.
+function MetricLine({ item }) {
+  if (item.pct == null) {
+    // 구형 응답 호환: one_line 에서 deviation 표기만 제거해 노출.
+    return <>{(item.one_line || "").replace(/[,·]?\s*deviation\s*-?[\d.]+/i, "")}</>;
+  }
+  const up = item.dir === "과다";
+  const err = item.err_ton;
+  const errStr = `${err > 0 ? "+" : ""}${err}톤`;
+  const cls = up ? "ag-metric--up" : "ag-metric--down";
+  return (
+    <>
+      예측 대비 <span className={cls}>{up ? "▲" : "▼"}<strong>{Math.abs(item.pct)}%</strong></span> (<strong>{errStr}</strong>)
+    </>
+  );
+}
+
 function AnomalyItem({ item, date }) {
   const tone = SEV_TONE[item.심각도] || "warn";
   const [cause, setCause] = useState(null); // {loading, data, error}
@@ -135,8 +164,8 @@ function AnomalyItem({ item, date }) {
     <li className={`ag-item ag-item--${tone}`}>
       <div className="ag-item-main">
         <span className={`ag-sev ag-sev--${tone}`}>{item.심각도}</span>
-        <strong className="ag-item-name">{item.역명}</strong>
-        <span className="ag-item-line">{item.one_line}</span>
+        <strong className="ag-item-name">{formatStationName(item.역명)}</strong>
+        <span className="ag-item-line"><MetricLine item={item} /></span>
       </div>
       {item.action ? <p className="ag-item-action">→ {item.action}</p> : null}
 
@@ -178,18 +207,21 @@ function CauseResult({ cause }) {
         <div className="ag-cause-events">
           <span className="ag-muted">관련 정보</span>
           <ul>
-            {a.events.map((e, i) => (
-              <li key={i}>
-                {e.source ? (
-                  <a href={e.source} target="_blank" rel="noreferrer">
-                    {e.title || e.source}
-                  </a>
-                ) : (
-                  e.title
-                )}{" "}
-                {e.date ? <span className="ag-muted">{e.date}</span> : null}
-              </li>
-            ))}
+            {a.events.map((e, i) => {
+              const url = extractUrl(e.source);
+              return (
+                <li key={i}>
+                  {url ? (
+                    <a href={url} target="_blank" rel="noreferrer">
+                      {e.title || url}
+                    </a>
+                  ) : (
+                    e.title || e.source
+                  )}{" "}
+                  {e.date ? <span className="ag-muted">{e.date}</span> : null}
+                </li>
+              );
+            })}
           </ul>
         </div>
       ) : null}

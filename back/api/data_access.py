@@ -23,6 +23,15 @@ def _norm_id(series: pd.Series) -> pd.Series:
 @lru_cache(maxsize=1)
 def _flagged() -> pd.DataFrame:
     df = pd.read_csv(config.ANOMALIES_FLAGGED, encoding="utf-8-sig")
+    # 라이브 소스(risk.json 과 동일) 컬럼명을 기존 스키마로 매핑.
+    df = df.rename(
+        columns={
+            "pred_ton": "predicted_ton",
+            "residual": "error_ton",
+            "z_score": "deviation_score",
+            "data_error_candidate": "likely_data_error",
+        }
+    )
     df["날짜"] = df["날짜"].astype(str)
     df["cid"] = _norm_id(df["고객번호"])
     return df
@@ -47,6 +56,7 @@ def _office_map() -> dict:
         )
     except Exception:
         return {}
+    df = df.fillna("")  # 결측(용도 등)은 NaN→"" (NaN 은 JSON 직렬화 불가)
     df["cid"] = _norm_id(df["고객번호"])
     df = df.drop_duplicates("cid", keep="last")
     return {
