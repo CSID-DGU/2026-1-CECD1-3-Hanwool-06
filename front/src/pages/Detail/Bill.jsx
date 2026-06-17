@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { won } from "./mock";
+import { won } from "./data";
 import { InfoTooltip, SectionTitle } from "./ui";
 import LineChart from "./LineChart";
 

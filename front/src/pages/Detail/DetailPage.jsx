@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { STATIONS, YESTERDAY, kdate, ton, won } from "./mock";
+import { useState, useEffect, useMemo } from "react";
+import { buildStations, latestDate, kdate, ton, won } from "./data";
 import { Card, EmptyNote, InfoTooltip, LineBadge, Pending, RiskBadge, RiskGauge, Stat } from "./ui";
 import LineChart from "./LineChart";
 import Bill from "./Bill";
@@ -17,76 +17,89 @@ const COVERAGE = {
   billonly: "청구서·기본정보만",
 };
 
-// 영업사업소 목록 (선택 → 해당 사업소 역만 노출). 영업사업소는 호선별 필드라 역의 첫 호선 값으로 그룹핑.
-const OFFICES = [...new Set(STATIONS.map((s) => s.lines[0].영업사업소))];
-
 const SEV_TONE = { 정상: "ok", 주의: "warn", 경고: "alert" };
 
+// 실데이터 4종 로드. 단일 HTML 데모는 window 전역(file:// fetch 불가), 그 외는 public/ fetch.
+function useData() {
+  const [data, setData] = useState(null);
+  useEffect(() => {
+    const keys = ["bills", "stations", "daily", "risk"];
+    const g = { bills: window.__BILLS__, stations: window.__STATIONS__, daily: window.__DAILY__, risk: window.__RISK__ };
+    Promise.all(
+      keys.map((k) =>
+        g[k]
+          ? Promise.resolve(g[k])
+          : fetch(`${import.meta.env.BASE_URL}${k}.json`).then((r) => (r.ok ? r.json() : {})).catch(() => ({}))
+      )
+    ).then(([bills, stations, daily, risk]) => setData({ bills, stations, daily, risk }));
+  }, []);
+  return data;
+}
+
 export default function DetailPage() {
+  const data = useData();
+  const stations = useMemo(
+    () => (data ? buildStations(data.bills, data.stations, data.daily, data.risk) : []),
+    [data]
+  );
+  const latest = useMemo(() => latestDate(stations), [stations]);
+
   const [stationId, setStationId] = useState(0);
   const [lineIdx, setLineIdx] = useState(0);
-  const station = STATIONS[stationId];
-  const line = station.lines[Math.min(lineIdx, station.lines.length - 1)];
 
-  // 청구서 실데이터(고객번호 키). 일일·승하차·위험도는 별도 소스라 아직 mock.
-  const [billMap, setBillMap] = useState(null);
+  // 로드되면 위험도 보이는 역(full74)을 기본 선택
   useEffect(() => {
-    if (window.__BILLS__) {
-      setBillMap(window.__BILLS__); // 단일 HTML 데모: 인라인 데이터 사용(file:// 에서 fetch 불가)
-      return;
+    if (stations.length) {
+      const i = stations.findIndex((s) => s.tier === "full74");
+      setStationId(i >= 0 ? i : 0);
+      setLineIdx(0);
     }
-    fetch(`${import.meta.env.BASE_URL}bills.json`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then(setBillMap)
-      .catch(() => {});
-  }, []);
-  const realBill = billMap?.[line.고객번호];
-  // 실데이터 있으면 청구서용 station/line 에만 실값 주입(없으면 mock 유지 → 데모 안 깨짐)
-  const billStation = realBill ? { ...station, 주소: realBill.주소, 용도: realBill.용도 } : station;
-  const billLine = realBill
-    ? {
-        ...line,
-        bills: realBill.bills,
-        전자수용가번호: realBill.전자수용가번호,
-        전자납부번호: realBill.전자납부번호,
-        계량기번호: realBill.계량기번호,
-        구경: realBill.구경,
-        가구수: realBill.가구수,
-      }
-    : line;
+  }, [stations]);
+
+  if (!stations.length) {
+    return (
+      <div className="dt-root">
+        <DetailTopBar />
+        <main className="dt-page">
+          <p style={{ padding: 40, color: "#667" }}>데이터 불러오는 중…</p>
+        </main>
+      </div>
+    );
+  }
+
+  const station = stations[Math.min(stationId, stations.length - 1)];
+  const line = station.lines[Math.min(lineIdx, station.lines.length - 1)];
+  const viewStation = { ...station, 주소: line.주소, 용도: line.용도, 사용자명: station.역명 };
+
+  const OFFICES = [...new Set(stations.map((s) => s.lines[0].영업사업소))].sort((a, b) => a.localeCompare(b, "ko"));
+  const office = station.lines[0].영업사업소;
 
   const selectStation = (i) => {
     setStationId(i);
     setLineIdx(0);
   };
-
-  const office = station.lines[0].영업사업소; // 선택된 역의 영업사업소
   const selectOffice = (o) => {
-    const idx = STATIONS.findIndex((s) => s.lines[0].영업사업소 === o);
-    if (idx >= 0) selectStation(idx); // 그 사업소의 첫 역으로
+    const idx = stations.findIndex((s) => s.lines[0].영업사업소 === o);
+    if (idx >= 0) selectStation(idx);
   };
 
-  // 카드를 좌/우 칸에 직접 배치해 높이 차로 인한 빈틈을 최소화
   const headerEl = <StationHeader key="header" station={station} line={line} lineIdx={lineIdx} setLineIdx={setLineIdx} />;
-  const basicEl = <BasicInfo key="basic" station={station} line={line} />;
-  const dailyEl = <DailyPanel key="daily" usage={line.daily} ridership={line.ridership} tooltip={DAILY_TIP} />;
+  const basicEl = <BasicInfo key="basic" station={viewStation} line={line} />;
+  const dailyEl = <DailyPanel key={`daily-${line.고객번호}`} usage={line.daily} ridership={line.ridership} latest={latest} tooltip={DAILY_TIP} />;
   const riskEl = line.risk ? (
     <RiskPanel key="risk" line={line} />
   ) : station.tier === "cut3" ? (
-    <RiskUnavailable key="risk" />
+    <RiskUnavailable key="risk" latest={latest} />
   ) : null;
 
   let leftCol, rightCol;
   if (station.tier === "billonly") {
-    // 청구서·기본정보만: 좌 헤더+일일(확인 불가) / 우 기본정보
     leftCol = [headerEl, dailyEl];
     rightCol = [basicEl];
   } else if (station.tier === "cut3") {
-    // 위험도가 짧은 안내라, 좌에 헤더+기본정보+안내 / 우에 일일(긴 쪽) → 높이 균형, 기본정보 여백 해소
     leftCol = [headerEl, basicEl, riskEl];
     rightCol = [dailyEl];
   } else {
-    // full74: 좌 헤더+일일 / 우 위험도(지표+5일 이력)+기본정보
     leftCol = [headerEl, dailyEl];
     rightCol = [riskEl, basicEl];
   }
@@ -106,9 +119,9 @@ export default function DetailPage() {
         </select>
         <span className="dt-demo-label">역</span>
         <select className="dt-demo-select" value={stationId} onChange={(e) => selectStation(Number(e.target.value))}>
-          {STATIONS.map((s, i) => (s.lines[0].영업사업소 === office ? <option key={i} value={i}>{s.역명}</option> : null))}
+          {stations.map((s, i) => (s.lines[0].영업사업소 === office ? <option key={i} value={i}>{s.역명}</option> : null))}
         </select>
-        <span className="dt-demo-note">데모 5역 · 추후 전체 역 연동</span>
+        <span className="dt-demo-note">전체 {stations.length}역 연동</span>
       </div>
 
       <main className="dt-page">
@@ -118,7 +131,7 @@ export default function DetailPage() {
         </div>
 
         <Card title="청구서" right={<InfoTooltip text={"청구서는 격월로 업데이트됩니다.\n해당 안내는 모든 역에 대해 표시됩니다."} />}>
-          <Bill key={line.고객번호} station={billStation} line={billLine} />
+          <Bill key={line.고객번호} station={viewStation} line={line} />
         </Card>
       </main>
     </div>
@@ -273,11 +286,11 @@ function RiskPanel({ line }) {
 }
 
 // cut3(사용량 수집 중단) 역: 위험도 자리에 산출 불가 안내
-function RiskUnavailable() {
+function RiskUnavailable({ latest }) {
   return (
-    <Card title="위험도" right={<span className="dt-risk-date">{kdate(YESTERDAY)} 기준</span>}>
+    <Card title="위험도" right={<span className="dt-risk-date">{kdate(latest)} 기준</span>}>
       <EmptyNote>
-        {kdate(YESTERDAY)} 일일 사용량이 수집되지 않아
+        {kdate(latest)} 일일 사용량이 수집되지 않아
         <br />
         <strong>위험도 산출이 불가합니다.</strong>
       </EmptyNote>
@@ -286,9 +299,15 @@ function RiskUnavailable() {
 }
 
 // 일일 사용량 + 승하차를 한 카드에. 날짜 하나로 둘 동시 조회.
-function DailyPanel({ usage, ridership, tooltip }) {
-  const [date, setDate] = useState(YESTERDAY);
+function DailyPanel({ usage, ridership, latest, tooltip }) {
   const series = [usage, ridership].filter(Boolean);
+  const maxDate = series.length
+    ? series
+        .map((s) => s[s.length - 1].date)
+        .sort()
+        .slice(-1)[0]
+    : latest;
+  const [date, setDate] = useState(maxDate);
 
   if (series.length === 0) {
     return (
@@ -303,10 +322,6 @@ function DailyPanel({ usage, ridership, tooltip }) {
   }
 
   const minDate = series.map((s) => s[0].date).sort()[0];
-  const maxDate = series
-    .map((s) => s[s.length - 1].date)
-    .sort()
-    .slice(-1)[0];
 
   return (
     <Card title="일일 사용량 · 승하차" right={<InfoTooltip text={tooltip} />}>
