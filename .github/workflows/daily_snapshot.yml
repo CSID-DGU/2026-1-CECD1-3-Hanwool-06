@@ -1,0 +1,72 @@
+name: 일별 위험도·사용량 스냅샷
+
+# daily-collect 의 원천 CSV로 매일 모델을 재학습해 위험도(risk.json)·사용량(daily.json)을
+# 재생성하고 daily-snapshot 브랜치에 커밋한다. (모델 자산은 daily-snapshot 에 상주)
+# 데모: git checkout origin/daily-snapshot -- front/public/risk.json front/public/daily.json
+on:
+  schedule:
+    - cron: '35 1 * * *'   # KST 10:35 (수집 마지막 시도 10:01 이후, 모델 ~1분)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    env:
+      TZ: Asia/Seoul
+
+    steps:
+      - name: daily-snapshot 체크아웃 (모델 자산 포함)
+        uses: actions/checkout@v4
+        with:
+          ref: daily-snapshot
+          fetch-depth: 0
+
+      - name: Python 설치
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: 패키지 설치
+        run: pip install lightgbm pandas numpy tqdm pyyaml holidays matplotlib
+
+      - name: 원천 raw CSV 전개 (daily-collect)
+        run: |
+          git fetch origin daily-collect
+          git archive origin/daily-collect data/daily | tar -x
+
+      - name: 달력(날짜인덱스) 라이브 날짜까지 연장
+        run: |
+          python back/scripts/dataset_etl/build_date_index.py \
+            --end "$(date +%F)" \
+            --out-path analysis/risk_snapshot/data/processed_data/날짜인덱스.csv
+
+      - name: 라이브 테스트셋 + 모델 재학습 + 이상탐지
+        working-directory: analysis/risk_snapshot
+        run: |
+          python make_live_test.py
+          python run_snapshot.py
+
+      - name: risk.json · daily.json 생성
+        working-directory: analysis/risk_snapshot
+        run: |
+          python build_risk_json.py
+          python build_daily_json.py
+
+      - name: 산출물 커밋·푸시 (daily-snapshot)
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add front/public/risk.json front/public/daily.json \
+                  analysis/risk_snapshot/scripts/LightGBM_Model/results/test_anomalies.csv \
+                  analysis/risk_snapshot/data/processed_data/날짜인덱스.csv
+          if git diff --staged --quiet; then
+            echo "산출물 변경 없음 — 종료"
+            exit 0
+          fi
+          git commit -m "data: $(date +%F) 위험도·사용량 스냅샷 자동 갱신"
+          git pull --rebase origin daily-snapshot || true
+          git push origin daily-snapshot
