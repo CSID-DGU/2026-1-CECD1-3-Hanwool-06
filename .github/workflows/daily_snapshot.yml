@@ -16,6 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       TZ: Asia/Seoul
+      MPLBACKEND: Agg   # 헤드리스 러너에서 matplotlib(그래프 저장) 백엔드 고정
 
     steps:
       - name: daily-snapshot 체크아웃 (모델 자산 포함)
@@ -31,7 +32,7 @@ jobs:
           cache: 'pip'
 
       - name: 패키지 설치
-        run: pip install lightgbm pandas numpy tqdm pyyaml holidays matplotlib
+        run: pip install -r analysis/risk_snapshot/scripts/LightGBM_Model/requirements.txt tqdm holidays
 
       - name: 원천 raw CSV 전개 (daily-collect)
         run: |
