@@ -5,7 +5,8 @@ name: 일별 위험도·사용량 스냅샷
 # 데모: git checkout origin/daily-snapshot -- front/public/risk.json front/public/daily.json
 on:
   schedule:
-    - cron: '35 1 * * *'   # KST 10:35 (수집 마지막 시도 10:01 이후, 모델 ~1분)
+    - cron: '30 0 * * *'   # KST 09:30 (1차)
+    - cron: '30 1 * * *'   # KST 10:30 (재시도·수집 마지막 시도 10:01 이후라 데이터 확정)
   workflow_dispatch:
 
 permissions:
