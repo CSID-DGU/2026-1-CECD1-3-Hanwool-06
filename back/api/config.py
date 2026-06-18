@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 
 # back/api/config.py -> 프로젝트 루트는 2단계 위
 ROOT = Path(__file__).resolve().parents[2]
-load_dotenv(ROOT / ".env")
+load_dotenv(ROOT / ".env", override=True)  # .env 를 셸 환경변수보다 우선 (TODAY_OVERRIDE 등 stale 값 방지)
 
 # ── OpenAI (에이전트) ──────────────────────────────────────────────
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")

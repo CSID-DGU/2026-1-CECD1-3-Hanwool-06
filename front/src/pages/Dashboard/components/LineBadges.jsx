@@ -1,4 +1,4 @@
-import { lineMeta } from "../data.js";
+import { lineMeta } from "../dashboardData.js";
 
 export default function LineBadges({ lines }) {
   return (

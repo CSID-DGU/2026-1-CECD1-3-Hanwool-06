@@ -63,6 +63,10 @@ ehthumbs.db
 # Project-local data files (optional; uncomment if data should not be tracked)
 # data/
 
+# 매일 자동 동기화되는 데이터 (daily-snapshot 에서 front/scripts/sync-data.mjs 로 받아옴)
+front/public/risk.json
+front/public/daily.json
+
 # 아리수 원본 엑셀 (용량 크고 재생성 가능)
 data/arisu_station_history/raw/
 

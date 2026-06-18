@@ -1,6 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import seoulMetroLogo from "../../assets/seoulmetro.svg";
-import { stations } from "./data.js";
+import { loadDashboard } from "./dashboardData.js";
 import { averageDelta } from "./utils.js";
 import AppHeader from "./components/AppHeader.jsx";
 import EmptyState from "./components/EmptyState.jsx";
@@ -18,6 +18,11 @@ export default function Dashboard() {
   const [selectedLine, setSelectedLine] = useState("all");
   const [selectedOffice, setSelectedOffice] = useState("all");
   const [selectedRisk, setSelectedRisk] = useState("all");
+  const [{ stations, offices }, setData] = useState({ stations: [], offices: [] });
+
+  useEffect(() => {
+    loadDashboard().then(setData);
+  }, []);
 
   const normalizedSearchTerm = searchTerm.trim().toLowerCase();
   const filteredStations = useMemo(
@@ -29,7 +34,7 @@ export default function Dashboard() {
         const riskOk = selectedRisk === "all" || station.risk === selectedRisk;
         return searchOk && lineOk && officeOk && riskOk;
       }),
-    [normalizedSearchTerm, selectedLine, selectedOffice, selectedRisk],
+    [stations, normalizedSearchTerm, selectedLine, selectedOffice, selectedRisk],
   );
 
   const stationMap = useMemo(() => new Map(filteredStations.map((station) => [station.id, station])), [filteredStations]);
@@ -68,6 +73,8 @@ export default function Dashboard() {
         setSelectedLine={setSelectedLine}
         setSelectedOffice={setSelectedOffice}
         setSelectedRisk={setSelectedRisk}
+        stations={stations}
+        offices={offices}
       />
 
       <section className="workspace">

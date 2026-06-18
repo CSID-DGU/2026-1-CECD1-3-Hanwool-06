@@ -1,4 +1,4 @@
-import { lineMeta, offices, riskMeta, stations } from "../data.js";
+import { lineMeta, riskMeta } from "../dashboardData.js";
 import SectionTitle from "./SectionTitle.jsx";
 
 export default function FilterPanel({
@@ -9,6 +9,8 @@ export default function FilterPanel({
   setSelectedLine,
   setSelectedOffice,
   setSelectedRisk,
+  stations,
+  offices,
 }) {
   return (
     <section className="control-panel" aria-label="필터">

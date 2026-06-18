@@ -1,4 +1,4 @@
-import { riskMeta } from "../data.js";
+import { riskMeta } from "../dashboardData.js";
 
 export default function RiskBadge({ risk }) {
   return <span className={`risk-badge risk-${riskMeta[risk].tone}`}>{riskMeta[risk].label}</span>;
