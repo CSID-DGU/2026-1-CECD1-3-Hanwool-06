@@ -74,7 +74,11 @@ def main() -> int:
     args.out_path.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(args.out_path, index=False, encoding="utf-8-sig")
 
-    print(f"saved → {args.out_path.relative_to(PROJECT_ROOT)} ({len(df):,}일)")
+    try:
+        shown = args.out_path.relative_to(PROJECT_ROOT)
+    except ValueError:
+        shown = args.out_path  # 상대경로/프로젝트 밖 경로로 호출된 경우 그대로 표시
+    print(f"saved → {shown} ({len(df):,}일)")
     print(f"  기간: {df['날짜'].iloc[0]} ~ {df['날짜'].iloc[-1]}")
     print(f"  공휴일: {df['공휴일'].sum()}일")
     print(f"  주말: {df['주말'].sum()}일")
