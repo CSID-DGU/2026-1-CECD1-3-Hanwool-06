@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import seoulMetroLogo from "../../assets/seoulmetro.svg";
 import { loadDashboard } from "./dashboardData.js";
 import { averageDelta } from "./utils.js";
@@ -23,6 +23,27 @@ export default function Dashboard() {
   useEffect(() => {
     loadDashboard().then(setData);
   }, []);
+
+  // 우선확인대상 카드 높이를 노선도(맵) 높이에 맞춤 (2단 레이아웃일 때만)
+  const workspaceRef = useRef(null);
+  const [sideHeight, setSideHeight] = useState(null);
+  useEffect(() => {
+    const ws = workspaceRef.current;
+    const mapEl = ws?.querySelector(".map-panel");
+    if (!ws || !mapEl) return;
+    const sync = () => {
+      const twoCol = getComputedStyle(ws).gridTemplateColumns.split(" ").length > 1;
+      setSideHeight(twoCol ? mapEl.offsetHeight : null);
+    };
+    const ro = new ResizeObserver(sync);
+    ro.observe(mapEl);
+    window.addEventListener("resize", sync);
+    sync();
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", sync);
+    };
+  }, [stations]);
 
   const normalizedSearchTerm = searchTerm.trim().toLowerCase();
   const filteredStations = useMemo(
@@ -77,15 +98,16 @@ export default function Dashboard() {
         offices={offices}
       />
 
-      <section className="workspace">
+      <section className="workspace" ref={workspaceRef}>
         <MapPanel
           selectedLine={selectedLine}
           selectedOffice={selectedOffice}
           selectedRisk={selectedRisk}
           stationMap={stationMap}
           setSelectedLine={setSelectedLine}
+          allStations={stations}
         />
-        <aside className="side-panel" aria-label="위험 역 목록">
+        <aside className="side-panel" aria-label="위험 역 목록" style={sideHeight ? { height: sideHeight } : undefined}>
           <SectionTitle title="우선 확인 대상" right={`${alertStations.length + warnStations.length}건`} />
           <div className="priority-list">
             {[...alertStations, ...warnStations].map((station) => (

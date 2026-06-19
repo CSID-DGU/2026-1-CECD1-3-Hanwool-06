@@ -24,6 +24,11 @@ export default function SummaryPopup() {
   const [state, setState] = useState({ loading: true, error: null, data: null });
 
   useEffect(() => {
+    // 정적 HTML(단일파일)에서는 백엔드 대신 주입된 요약을 사용
+    if (typeof window !== "undefined" && window.__SUMMARY__) {
+      setState({ loading: false, error: null, data: window.__SUMMARY__ });
+      return;
+    }
     let alive = true;
     getSummary()
       .then((data) => alive && setState({ loading: false, error: null, data }))

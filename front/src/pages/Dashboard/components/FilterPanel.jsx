@@ -51,7 +51,7 @@ export default function FilterPanel({
         <div className="field field-wide">
           <span className="field-label">위험도</span>
           <div className="risk-filter" role="group" aria-label="위험도 필터">
-            {Object.entries(riskMeta).map(([risk, meta]) => (
+            {Object.entries(riskMeta).filter(([risk]) => risk !== "ok").map(([risk, meta]) => (
               <button className={`${selectedRisk === risk ? "is-on" : ""} risk-${meta.tone}`} onClick={() => setSelectedRisk(risk)} type="button" key={risk}>
                 {meta.label}
                 <span>{risk === "all" ? stations.length : stations.filter((station) => station.risk === risk).length}</span>

@@ -41,6 +41,9 @@ node_modules/
 dist/
 front/dist/
 front/demo-dist/
+front/dist-single/
+front/demo_site.html
+front/demo_final.html
 build/
 *.egg-info/
 

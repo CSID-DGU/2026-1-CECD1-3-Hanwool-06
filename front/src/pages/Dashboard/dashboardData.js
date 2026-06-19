@@ -54,10 +54,12 @@ function buildStations(risk, smeta) {
 
 export async function loadDashboard() {
   const base = import.meta.env.BASE_URL;
+  // 정적 HTML(단일파일)에서는 주입된 전역(window.__RISK__ 등)을 우선 사용
+  const g = typeof window !== "undefined" ? window : {};
   try {
     const [risk, smeta] = await Promise.all([
-      fetch(`${base}risk.json`).then((r) => r.json()),
-      fetch(`${base}stations.json`).then((r) => r.json()),
+      g.__RISK__ ? Promise.resolve(g.__RISK__) : fetch(`${base}risk.json`).then((r) => r.json()),
+      g.__STATIONS__ ? Promise.resolve(g.__STATIONS__) : fetch(`${base}stations.json`).then((r) => r.json()),
     ]);
     const stations = buildStations(risk, smeta);
     const offices = [...new Set(stations.map((s) => s.office).filter(Boolean))].sort();

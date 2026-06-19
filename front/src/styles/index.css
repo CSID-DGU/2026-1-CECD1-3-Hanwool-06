@@ -141,7 +141,7 @@ a {
 .workspace,
 .table-panel {
   width: calc(100% - 56px);
-  max-width: 1480px;
+  max-width: 1160px;   /* 역 상세(.dt-page)와 동일 폭. 상단바는 풀폭 유지 */
   margin-right: auto;
   margin-left: auto;
 }
@@ -285,8 +285,8 @@ a {
 
 .control-panel-body {
   display: grid;
-  grid-template-columns: 210px minmax(560px, 1fr) minmax(370px, 0.7fr) auto;
-  gap: 12px;
+  grid-template-columns: 180px minmax(340px, 1fr) auto auto;
+  gap: 10px;
   align-items: end;
 }
 
@@ -304,20 +304,20 @@ a {
 .field label,
 .field-label {
   color: var(--faint);
-  font-size: 14px;
+  font-size: 12.5px;
   font-weight: 800;
 }
 
 .field select,
 .field input {
   width: 100%;
-  height: 46px;
-  padding: 0 14px;
+  height: 38px;
+  padding: 0 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fff;
   color: var(--ink);
-  font-size: 15px;
+  font-size: 13.5px;
 }
 
 .field input::placeholder {
@@ -343,23 +343,24 @@ a {
 .line-filter button,
 .risk-filter button,
 .reset-btn {
-  height: 46px;
+  height: 38px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fff;
   color: var(--muted);
   font-weight: 800;
+  font-size: 13px;
   transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease, opacity 0.15s ease;
 }
 
 .line-filter button {
-  min-width: 48px;
-  padding: 0 12px;
+  min-width: 38px;
+  padding: 0 9px;
   white-space: nowrap;
 }
 
 .line-filter button:first-child {
-  min-width: 64px;
+  min-width: 48px;
 }
 
 .line-filter button:not(:first-child) {
@@ -380,11 +381,11 @@ a {
 
 .risk-filter button {
   display: inline-flex;
-  min-width: 88px;
+  min-width: 64px;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  padding: 0 14px;
+  gap: 6px;
+  padding: 0 12px;
   white-space: nowrap;
 }
 
@@ -445,7 +446,6 @@ a {
 
 .map-panel,
 .side-panel {
-  height: 646px;
   padding: 16px 18px 18px;
 }
 
@@ -511,8 +511,7 @@ a {
 
 .metro-map {
   position: relative;
-  flex: 1;
-  min-height: 0;
+  width: 100%;
   margin-top: 14px;
   overflow: hidden;
   border: 1px solid var(--line);
@@ -520,10 +519,128 @@ a {
   background: #fafbff;
 }
 
-.metro-map svg {
-  display: block;
+.map-image-wrap {
+  position: relative;
   width: 100%;
-  height: 100%;
+}
+.metro-map-img {
+  display: block;
+  width: 100%;   /* 패널 폭에 꽉 차게 (직사각 이미지) */
+  height: auto;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+/* 주의·경고 역 핀 (이미지 기준 % 좌표에 절대배치) */
+.map-pin {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  z-index: 3;
+  pointer-events: none;
+}
+/* 알람 핀: 점은 항상, 이름은 호버 시에만 (많아도 안 겹치게) */
+.map-pin--hoverable {
+  pointer-events: auto;
+}
+.map-pin--hoverable:hover {
+  z-index: 6;
+}
+.map-pin--hoverable:hover .map-pin-label {
+  display: block;
+}
+/* 지점이 "빛나는" 헤일로 */
+.map-pin::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  z-index: -1;
+}
+.map-pin--warn::before {
+  background: radial-gradient(circle, rgba(232, 145, 10, 0.5), rgba(232, 145, 10, 0) 70%);
+}
+.map-pin--alert::before {
+  background: radial-gradient(circle, rgba(217, 45, 32, 0.5), rgba(217, 45, 32, 0) 70%);
+}
+.map-pin-dot {
+  display: block;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 3px solid #fff;
+  box-shadow: 0 1px 6px rgba(20, 30, 60, 0.45);
+}
+.map-pin--warn .map-pin-dot {
+  background: #e8910a;
+  animation: map-pulse-warn 1.8s ease-out infinite;
+}
+.map-pin--alert .map-pin-dot {
+  background: #d92d20;
+  animation: map-pulse-alert 1.8s ease-out infinite;
+}
+@keyframes map-pulse-warn {
+  0% { box-shadow: 0 1px 6px rgba(20, 30, 60, 0.45), 0 0 0 0 rgba(232, 145, 10, 0.55); }
+  100% { box-shadow: 0 1px 6px rgba(20, 30, 60, 0.45), 0 0 0 16px rgba(232, 145, 10, 0); }
+}
+@keyframes map-pulse-alert {
+  0% { box-shadow: 0 1px 6px rgba(20, 30, 60, 0.45), 0 0 0 0 rgba(217, 45, 32, 0.55); }
+  100% { box-shadow: 0 1px 6px rgba(20, 30, 60, 0.45), 0 0 0 16px rgba(217, 45, 32, 0); }
+}
+.map-pin-label {
+  display: none;
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.3;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(20, 30, 60, 0.22);
+}
+.map-pin--below .map-pin-label {
+  bottom: auto;
+  top: 16px;
+}
+.map-pin--warn .map-pin-label {
+  color: #b5790a;
+}
+.map-pin--alert .map-pin-label {
+  color: #d92d20;
+}
+
+/* 위치 보정 모드(#cal) */
+.cal-bar {
+  margin-top: 12px;
+  font-size: 13px;
+}
+.cal-btns {
+  display: flex;
+  gap: 8px;
+  margin: 8px 0;
+}
+.cal-btns button {
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 13px;
+}
+.cal-out {
+  width: 100%;
+  height: 160px;
+  font-family: monospace;
+  font-size: 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px;
 }
 
 .map-bg {
@@ -648,7 +765,6 @@ a {
 .side-panel {
   display: flex;
   flex-direction: column;
-  height: 646px;
   overflow: hidden;
   min-width: 0;
 }
@@ -916,26 +1032,6 @@ a {
   .side-panel,
   .table-panel {
     padding: 14px;
-  }
-
-  .map-panel {
-    height: auto;
-    min-height: 520px;
-  }
-
-  .metro-map,
-  .metro-map svg {
-    height: 460px;
-  }
-
-  .metro-map {
-    flex: none;
-    overflow-x: auto;
-  }
-
-  .metro-map svg {
-    width: 760px;
-    max-width: none;
   }
 
   .map-legend {
