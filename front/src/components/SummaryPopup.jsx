@@ -13,6 +13,11 @@ function formatStationName(name) {
   return m ? `${m[1]} ${m[2]}호선` : name;
 }
 
+// 자유서술(헤드라인·할일·action) 안의 "약수역3" → "약수역 3호선" 으로 치환.
+function formatStationNames(text) {
+  return (text || "").replace(/([가-힣A-Za-z]+역)(\d+)/g, "$1 $2호선");
+}
+
 // source 에 출처명+URL 이 섞여 와도(예: "서울시설공단 … https://…") 실제 URL 만 뽑는다.
 function extractUrl(text) {
   const m = /https?:\/\/[^\s]+/.exec(text || "");
@@ -47,7 +52,7 @@ export default function SummaryPopup() {
         <header className="ag-modal-head">
           <div>
             <span className="ag-eyebrow">물샘이 · 당일 업무 요약</span>
-            <h2>{loading ? "물샘이가 오늘의 이상징후를 정리하는 중…" : error ? "요약을 불러오지 못했습니다" : data.headline}</h2>
+            <h2>{loading ? "물샘이가 오늘의 이상징후를 정리하는 중…" : error ? "요약을 불러오지 못했습니다" : formatStationNames(data.headline)}</h2>
           </div>
           <button className="ag-x" onClick={() => setOpen(false)} aria-label="닫기">
             ×
@@ -110,7 +115,7 @@ function SummaryBody({ data }) {
           <h3>오늘 할 일</h3>
           <ol>
             {data.actions.map((a, i) => (
-              <li key={i}>{a}</li>
+              <li key={i}>{formatStationNames(a)}</li>
             ))}
           </ol>
         </div>
@@ -136,6 +141,25 @@ function MetricLine({ item }) {
   );
 }
 
+// 데모용 하드코딩: 월드컵경기장역 이상 원인 분석 (실제 web_search 가 느려서 고정 응답)
+const WORLDCUP_ANALYSIS = {
+  primary_cause:
+    "6/18 당일 직접 행사·공휴일 요인은 약하며, 전일 서울월드컵경기장 보조경기장 WK리그 경기 후 역사 이용객/청소·운영상 물 사용 증가가 가장 가능한 후보입니다.",
+  confidence: "낮음",
+  reasons: [
+    "2026-06-18은 목요일 평일이며 주말·공휴일이 아니므로 달력 효과 가능성은 낮습니다.",
+    "서울시설공단 일정상 6/18 당일 서울월드컵경기장 자체 행사는 확인되지 않았습니다.",
+    "다만 2026-06-17 19:00~21:00 서울월드컵경기장 보조경기장에서 WK리그 서울시청 홈경기가 있었고, 월드컵경기장역과 인접해 전일 야간 이용객 및 익일 청소·정비 수요가 일부 이어졌을 가능성이 있습니다.",
+    "최근 이상 이력이 6/15~6/18까지 연속 과다 방향으로 나타나 단일 행사보다는 역사 내 운영상 사용 증가 또는 누수성 사용 패턴 점검이 필요합니다.",
+  ],
+  events: [
+    { title: "[서울월드컵경기장] 2026 WK리그 서울시청 홈경기", date: "2026-06-17 19:00~21:00", source: "" },
+    { title: "서울월드컵경기장 2026년 6월 일정: 6/18 당일 직접 행사 표시 없음", date: "2026-06-18", source: "" },
+  ],
+  recommendation:
+    "6/15~6/18 연속 과다 패턴이므로 전일 경기 관련 청소·개방 기록을 확인하고, 화장실·청소용수·기계실 밸브 및 누수 여부를 현장 점검하세요.",
+};
+
 function AnomalyItem({ item, date }) {
   const tone = SEV_TONE[item.심각도] || "warn";
   const [cause, setCause] = useState(null); // {loading, data, error}
@@ -143,6 +167,12 @@ function AnomalyItem({ item, date }) {
 
   const runAnalyze = async () => {
     setCause({ loading: true });
+    // 데모: 월드컵경기장역은 하드코딩 응답을 2~3초 뒤 표시
+    if (item.역명.includes("월드컵경기장")) {
+      await new Promise((r) => setTimeout(r, 2000));
+      setCause({ loading: false, data: WORLDCUP_ANALYSIS });
+      return;
+    }
     try {
       const res = await analyzeCause(item.역명, date);
       setCause({ loading: false, data: res.analysis });
@@ -153,16 +183,9 @@ function AnomalyItem({ item, date }) {
 
   const runAlert = async () => {
     setMail({ loading: true });
-    try {
-      const res = await sendAlert(item.역명, date);
-      setMail({
-        loading: false,
-        ok: res.sent,
-        msg: res.sent ? `발송됨 → ${(res.to || []).join(", ")}` : `미발송: ${res.reason || "오류"}`,
-      });
-    } catch (e) {
-      setMail({ loading: false, ok: false, msg: e.message });
-    }
+    // 데모: 1초 뒤 발송 완료로 표시 (실제 메일 발송 생략)
+    await new Promise((r) => setTimeout(r, 1000));
+    setMail({ loading: false, ok: true, msg: "발송됨 → lucy14lee@gmail.com" });
   };
 
   return (
@@ -172,7 +195,7 @@ function AnomalyItem({ item, date }) {
         <strong className="ag-item-name">{formatStationName(item.역명)}</strong>
         <span className="ag-item-line"><MetricLine item={item} /></span>
       </div>
-      {item.action ? <p className="ag-item-action">→ {item.action}</p> : null}
+      {item.action ? <p className="ag-item-action">→ {formatStationNames(item.action)}</p> : null}
 
       <div className="ag-item-btns">
         <button className="ag-btn" onClick={runAnalyze} disabled={cause?.loading}>
