@@ -32,6 +32,7 @@ jobs:
           python back/pipelines/daily_ridership/run_daily.py "$START" "$END"
 
       - name: 결과 커밋 (daily-collect 브랜치 data/daily/ridership/)
+        if: always()   # 파이프라인이 일부 날짜(SSL 타임아웃 등)만 실패해도, 성공한 날짜는 커밋되게
         run: |
           # 방금 만든 CSV들을 임시 보관 후 브랜치 전환 (충돌 방지)
           mkdir -p /tmp/ridership

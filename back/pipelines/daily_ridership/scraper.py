@@ -13,6 +13,8 @@ from __future__ import annotations
 import csv
 import json
 import re
+import time
+import urllib.error
 import urllib.request
 from collections import defaultdict
 from datetime import date
@@ -64,12 +66,18 @@ def _load_meters() -> list[dict]:
 
 def _fetch_day(key: str, ymd: str) -> tuple[dict, dict]:
     """하루치를 받아 (역·호선)별·(역)별 총승객수를 만든다. 미적재면 ({}, {})."""
-    def call(page: int) -> dict:
+    def call(page: int, retries: int = 3) -> dict:
         url = (f"{ENDPOINT}?serviceKey={key}&pageNo={page}"
                f"&numOfRows={NUM_OF_ROWS}&dataType=JSON&pasngYmd={ymd}")
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            return json.loads(resp.read().decode("utf-8"))
+        for attempt in range(1, retries + 1):
+            try:
+                with urllib.request.urlopen(req, timeout=60) as resp:
+                    return json.loads(resp.read().decode("utf-8"))
+            except (urllib.error.URLError, TimeoutError):
+                if attempt == retries:
+                    raise
+                time.sleep(3)  # 일시적 SSL/네트워크 오류 재시도 (67콜 중 1건 타임아웃에 하루 전체가 죽는 것 방지)
 
     body = call(1)["response"]["body"]
     total = int(body["totalCount"])
