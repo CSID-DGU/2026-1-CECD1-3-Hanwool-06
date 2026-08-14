@@ -24,9 +24,9 @@ jobs:
       - name: .env 생성
         run: echo "SEOUL_PSGR_KEY=${{ secrets.SEOUL_PSGR_KEY }}" >> .env
 
-      - name: 파이프라인 실행 (최근 3일치 — 적재 지연 대비 자가복구)
+      - name: 파이프라인 실행 (최근 5일치 — 적재 지연·일시 네트워크 오류 대비 자가복구)
         run: |
-          START=$(python3 -c "from datetime import date, timedelta; print(date.today() - timedelta(days=3))")
+          START=$(python3 -c "from datetime import date, timedelta; print(date.today() - timedelta(days=5))")
           END=$(python3 -c "from datetime import date, timedelta; print(date.today() - timedelta(days=1))")
           echo "수집 범위: $START ~ $END"
           python back/pipelines/daily_ridership/run_daily.py "$START" "$END"

@@ -8,12 +8,17 @@
 
 승하차는 적재 지연이 있어 어제치가 아직 안 떴을 수 있다. 미적재 날짜는 건너뛰며(에러 아님),
 Actions 는 최근 며칠치를 덮어쓰며 돌려 빠진 날을 자동으로 메꾼다.
+
+일시적 네트워크 오류(타임아웃 등)는 워크플로 실패로 치지 않는다 — 자가복구 윈도우가 다음 실행에서
+같은 날짜를 다시 시도하므로, 매번 빨간불을 띄울 만한 사고가 아니다. 그 외 오류(코드/데이터 문제)는
+그대로 실패 처리해 눈에 띄게 한다.
 """
 import argparse
 import sys
 import traceback
 from datetime import date, timedelta
 from pathlib import Path
+from urllib.error import URLError
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -36,6 +41,9 @@ def run(start: date | None = None, end: date | None = None) -> bool:
         try:
             path = scrape(day)
             print(f"  {day} → {path}" if path else f"  {day}: API 미적재 → 건너뜀")
+        except (URLError, TimeoutError, OSError) as e:
+            # 일시적 네트워크 오류 — 자가복구 윈도우가 다음 실행에서 재시도하므로 실패 처리하지 않음
+            print(f"  ⚠ {day} 네트워크 오류(다음 실행에서 자동 재시도): {e}")
         except Exception as e:
             print(f"  ❌ {day} 수집 실패: {e}")
             traceback.print_exc()
