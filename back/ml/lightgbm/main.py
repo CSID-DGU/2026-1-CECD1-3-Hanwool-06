@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import sys
+import argparse
 from pathlib import Path
 
 import numpy as np
@@ -21,17 +22,21 @@ HERE = Path(__file__).resolve().parent
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
-import dataset  # noqa: E402
-import metric  # noqa: E402
-import utils  # noqa: E402
-from model import LightGBMForecaster  # noqa: E402
+if __package__:
+    from . import dataset, metric, utils
+    from .model import LightGBMForecaster
+else:
+    import dataset
+    import metric
+    import utils
+    from model import LightGBMForecaster
 
 
-def run(config_path: Path | None = None) -> dict:
+def run(config_path: Path | None = None, out_dir: Path | None = None) -> dict:
     """전체 파이프라인 실행: 검증모델→임계값 확정, 최종모델→test 예측·이상탐지·결과저장. 지표 dict 반환."""
     cfg = utils.load_config(config_path or HERE / "config.yaml")
     utils.set_seed(int(cfg["seed"]))
-    results_dir = utils.ensure_dir(HERE / "results")
+    results_dir = utils.ensure_dir(out_dir or cfg.get("output_dir") or HERE.parents[2] / "data" / "runtime" / "model")
     warn_q = float(cfg["anomaly"]["warn_quantile"])    # 주의 분위수 (상위 5%)
     alert_q = float(cfg["anomaly"]["alert_quantile"])  # 경고 분위수 (상위 1%)
 
@@ -42,6 +47,8 @@ def run(config_path: Path | None = None) -> dict:
     X_train, y_train = dataset.split_xy(valid_data, train_mask)
     X_valid = dataset.split_features(valid_data, "valid")
     y_valid = valid_data.frame.loc[valid_data.frame["split"] == "valid", dataset.TARGET].reset_index(drop=True)
+    if X_train.empty or X_valid.empty or not np.isfinite(y_valid.to_numpy(dtype=float)).all():
+        raise ValueError("Model requires non-empty train and finite validation observations")
 
     valid_model = LightGBMForecaster(cfg["model"])
     valid_model.fit(X_train, y_train, valid_data.categorical_cols,
@@ -51,7 +58,8 @@ def run(config_path: Path | None = None) -> dict:
     valid_meta = dataset.split_meta(valid_data, "valid")
     valid_pred = valid_model.predict(X_valid)
     # valid 의 |deviation_score| 분포 q95/q99 를 임계값으로 확정 → test 에도 동일 적용
-    valid_scored = metric.score_predictions(valid_meta, valid_pred)
+    calibration = metric.fit_calibration(valid_meta, valid_pred)
+    valid_scored = metric.score_predictions(valid_meta, valid_pred, calibration)
     warn_t, alert_t = metric.score_quantiles(valid_scored["deviation_score"], warn_q, alert_q)
     valid_summary = metric.summarize(metric.classify(valid_scored, warn_t, alert_t))
     valid_bias = utils.build_valid_bias(valid_meta, valid_pred)
@@ -65,14 +73,20 @@ def run(config_path: Path | None = None) -> dict:
     X_final, y_final = dataset.split_xy(final_data, final_mask)
     X_test = dataset.split_features(final_data, "test")
 
-    final_model = LightGBMForecaster(cfg["model"])
+    final_params = dict(cfg["model"])
+    final_params["n_estimators"] = int(valid_model.model.best_iteration_ or cfg["model"]["n_estimators"])
+    if X_test.empty:
+        raise ValueError("No eligible test observations; snapshot must be withheld")
+    final_model = LightGBMForecaster(final_params)
     # 조기종료는 없지만 tqdm 에 train loss 가 보이도록 학습셋을 eval 로 넣는다
     final_model.fit(X_final, y_final, final_data.categorical_cols, eval_set=(X_final, y_final))
 
     test_meta = dataset.split_meta(final_data, "test")
     test_pred_raw = final_model.predict(X_test)
     test_pred = utils.postprocess_predictions(test_meta, test_pred_raw, valid_bias, cfg)
-    test_anomalies = metric.classify(metric.score_predictions(test_meta, test_pred), warn_t, alert_t)
+    if not np.isfinite(test_pred).all() or len(test_pred) != len(test_meta):
+        raise ValueError("Model returned incomplete or non-finite predictions")
+    test_anomalies = metric.classify(metric.score_predictions(test_meta, test_pred, calibration), warn_t, alert_t)
     test_anomalies.insert(5, "predicted_ton_before_adjust", np.asarray(test_pred_raw, dtype=float).round(3))
     test_summary = metric.summarize(test_anomalies)
     print(f"  test {utils.format_summary(test_summary)}")
@@ -83,6 +97,9 @@ def run(config_path: Path | None = None) -> dict:
         "mode": "validation=train->valid, final=train+valid->test",
         "postprocess": cfg.get("postprocess", {}),
         "feature_count": len(final_data.feature_cols),
+        "best_iteration": final_params["n_estimators"],
+        "warn_threshold": warn_t,
+        "alert_threshold": alert_t,
         "train_rows_for_valid_model": int(train_mask.sum()),
         "train_rows_for_final_model": int(final_mask.sum()),
         "valid": valid_summary,
@@ -94,10 +111,15 @@ def run(config_path: Path | None = None) -> dict:
                    results_dir / "test_anomalies_flagged.csv")
     utils.save_csv(final_model.feature_importance(final_data.feature_cols),
                    results_dir / "feature_importance.csv")
-    utils.save_scatter_plot(test_anomalies, warn_q, alert_q, results_dir / "test_pred_vs_actual.png")
+    if cfg.get("save_plot", True):
+        utils.save_scatter_plot(test_anomalies, warn_q, alert_q, results_dir / "test_pred_vs_actual.png")
     print(f"  saved: {results_dir}")
     return metrics
 
 
 if __name__ == "__main__":
-    run()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--config", type=Path, default=HERE / "config.yaml")
+    parser.add_argument("--out-dir", type=Path)
+    args = parser.parse_args()
+    run(args.config, args.out_dir)

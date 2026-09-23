@@ -30,21 +30,44 @@ def mae(actual: np.ndarray, pred: np.ndarray) -> float:
     return float(np.mean(np.abs(actual - pred)))
 
 
-def score_predictions(meta: pd.DataFrame, predicted_ton: np.ndarray) -> pd.DataFrame:
+def fit_calibration(meta: pd.DataFrame, predicted_ton: np.ndarray) -> pd.DataFrame:
+    """Freeze residual center/scale on validation, independently of future test rows."""
+    frame = meta[["고객번호", "일사용량_톤"]].copy()
+    frame["residual"] = frame["일사용량_톤"].to_numpy(dtype=float) - np.asarray(predicted_ton, dtype=float)
+    rows = []
+    for customer, group in frame.groupby("고객번호", observed=True):
+        values = group["residual"]
+        center = float(values.median())
+        scale = float(1.4826 * (values - center).abs().median())
+        if not np.isfinite(scale) or scale < 1e-6:
+            scale = float(values.std())
+        if not np.isfinite(scale) or scale < 1e-6:
+            scale = 1.0
+        rows.append({"고객번호": customer, "center": center, "scale": scale})
+    return pd.DataFrame(rows).set_index("고객번호")
+
+
+def score_predictions(meta: pd.DataFrame, predicted_ton: np.ndarray, calibration=None) -> pd.DataFrame:
     """예측오차와 역별 deviation_score 까지만 계산(심각도 분류 전 단계)."""
     df = meta.copy()
     df["predicted_ton"] = np.asarray(predicted_ton, dtype=float).round(3)
     df["error_ton"] = (df["일사용량_톤"] - df["predicted_ton"]).round(3)   # 실제 − 예측
-    df["deviation_score"] = df.groupby("고객번호")["error_ton"].transform(_deviation_score).round(3)
-    # 명백한 데이터 오류(음수/비현실적 대용량)는 따로 표시 → RMSE 계산에서 분리할 때 사용
-    df["likely_data_error"] = (df["일사용량_톤"] < 0) | (df["일사용량_톤"] > 500)
+    calibration = fit_calibration(meta, predicted_ton) if calibration is None else calibration
+    center = df["고객번호"].map(calibration["center"]).astype(float)
+    scale = df["고객번호"].map(calibration["scale"]).astype(float)
+    df["deviation_score"] = ((df["error_ton"] - center) / scale).round(3)
+    # 큰 사용량만으로 자료 오류로 판정하면 실제 급증 경고가 화면에서 숨겨진다.
+    df["likely_data_error"] = ~np.isfinite(df["일사용량_톤"]) | (df["일사용량_톤"] < 0)
     return df
 
 
 def score_quantiles(deviation_score: pd.Series, warn_q: float, alert_q: float) -> tuple[float, float]:
     """|deviation_score| 분포에서 주의/경고 임계값을 분위수로 구한다 (예: warn_q=0.95, alert_q=0.99)."""
     abs_score = deviation_score.abs()
-    return float(abs_score.quantile(warn_q)), float(abs_score.quantile(alert_q))
+    abs_score = abs_score[np.isfinite(abs_score)]
+    if abs_score.empty:
+        raise ValueError("Validation has no finite anomaly calibration scores")
+    return max(1e-6, float(abs_score.quantile(warn_q))), max(1e-6, float(abs_score.quantile(alert_q)))
 
 
 def classify(df: pd.DataFrame, warn_threshold: float, alert_threshold: float) -> pd.DataFrame:
@@ -53,7 +76,8 @@ def classify(df: pd.DataFrame, warn_threshold: float, alert_threshold: float) ->
     abs_score = out["deviation_score"].abs()
     out["심각도"] = np.where(abs_score >= alert_threshold, "경고",
                            np.where(abs_score >= warn_threshold, "주의", "정상"))
-    out["방향"] = np.where(out["심각도"] == "정상", "",
+    out.loc[abs_score.isna(), "심각도"] = "자료부족"
+    out["방향"] = np.where(out["심각도"].isin(["정상", "자료부족"]), "",
                          np.where(out["deviation_score"] > 0, "과다", "과소"))
     return out
 
@@ -61,7 +85,7 @@ def classify(df: pd.DataFrame, warn_threshold: float, alert_threshold: float) ->
 def summarize(anomalies: pd.DataFrame) -> dict:
     """RMSE 변형들과 이상탐지 건수를 요약한다.
 
-    rmse_without_data_errors : 음수/비현실 대용량(데이터 오류)만 뺀 정직한 예측오차(헤드라인 권장).
+    rmse_without_data_errors : 음수/비유한 관측만 제외한 예측오차.
     rmse_excluding_alerts    : 경고로 탐지된 날까지 뺀 값 — 참고용(낙관적).
     rmse_normal_only         : 주의·경고 모두 뺀 '정상'만 — 정상 패턴 적합도.
     """
@@ -70,14 +94,16 @@ def summarize(anomalies: pd.DataFrame) -> dict:
     not_alert = (anomalies["심각도"] != "경고").to_numpy()
     no_error = (~anomalies["likely_data_error"]).to_numpy()
     normal_only = (anomalies["심각도"] == "정상").to_numpy()   # 주의·경고 모두 제외
+    def measured(fn, mask):
+        return round(fn(actual[mask], pred[mask]), 4) if mask.any() else None
 
     return {
         "rmse": round(rmse(actual, pred), 4),
-        "rmse_without_data_errors": round(rmse(actual[no_error], pred[no_error]), 4),
-        "rmse_excluding_alerts": round(rmse(actual[not_alert], pred[not_alert]), 4),
-        "rmse_normal_only": round(rmse(actual[normal_only], pred[normal_only]), 4),
+        "rmse_without_data_errors": measured(rmse, no_error),
+        "rmse_excluding_alerts": measured(rmse, not_alert),
+        "rmse_normal_only": measured(rmse, normal_only),
         "mae": round(mae(actual, pred), 4),
-        "mae_normal_only": round(mae(actual[normal_only], pred[normal_only]), 4),
+        "mae_normal_only": measured(mae, normal_only),
         "n_samples": int(len(anomalies)),
         "n_not_alert": int(not_alert.sum()),
         "n_normal_only": int(normal_only.sum()),
@@ -88,18 +114,3 @@ def summarize(anomalies: pd.DataFrame) -> dict:
         "과소": int((anomalies["방향"] == "과소").sum()),
         "n_likely_data_error": int(anomalies["likely_data_error"].sum()),
     }
-
-
-def _deviation_score(series: pd.Series) -> pd.Series:
-    """(값 − 중앙값) / (1.4826 × 중앙값절대편차). 편차가 0 이면 표준편차로 대체.
-
-    평균/표준편차 대신 중앙값 기준이라 극단치에 강건하다(이상치가 기준을 흔들지 않음).
-    """
-    median = series.median()
-    median_abs_dev = (series - median).abs().median()
-    if median_abs_dev == 0 or pd.isna(median_abs_dev):
-        std = series.std()
-        if std == 0 or pd.isna(std):
-            return pd.Series(0.0, index=series.index)
-        return (series - median) / std
-    return (series - median) / (1.4826 * median_abs_dev)

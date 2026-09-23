@@ -9,16 +9,17 @@ Outputs:
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
-RAW_DIR = ROOT / "data" / "raw" / "billing_i121"
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(ROOT))
 
-from i121_crawler.auth import MYARISU_URL, session_from_env  # noqa: E402
+from i121_crawler.auth import MYARISU_URL, session_from_env, _looks_like_login_page, LoginError  # noqa: E402
 from i121_crawler.parser import discover_mkeys  # noqa: E402
+from back.pipelines.common import RUNTIME, atomic_text, write_json
+RAW_DIR = RUNTIME / "raw" / "billing_i121"
 
 
 def parse_args() -> argparse.Namespace:
@@ -39,7 +40,7 @@ def parse_args() -> argparse.Namespace:
         "--env-path",
         type=Path,
         default=ROOT / ".env",
-        help="path to .env containing I121_USER_ID / I121_USER_PWD",
+        help="path to .env containing ARISU_USER_ID / ARISU_USER_PWD",
     )
     return parser.parse_args()
 
@@ -57,9 +58,11 @@ def main() -> int:
 
     response = session.get(MYARISU_URL, params={"_m": "m6"}, timeout=30)
     response.raise_for_status()
+    if _looks_like_login_page(response.text):
+        raise LoginError("Arisu session expired")
     html_path = args.cache_dir / "myarisu_initial.html"
-    html_path.write_text(response.text, encoding="utf-8")
-    print(f"saved landing html → {html_path.relative_to(ROOT)}", flush=True)
+    atomic_text(html_path, response.text)
+    print(f"saved landing html → {html_path}", flush=True)
 
     mkeys = discover_mkeys(response.text)
     if not mkeys:
@@ -70,11 +73,8 @@ def main() -> int:
         )
         return 1
 
-    args.out_path.write_text(
-        json.dumps(mkeys, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    print(f"discovered {len(mkeys)} mkeys → {args.out_path.relative_to(ROOT)}")
+    write_json(args.out_path, mkeys)
+    print(f"discovered {len(mkeys)} mkeys → {args.out_path}")
     for k in mkeys[:5]:
         print(f"  {k}")
     if len(mkeys) > 5:

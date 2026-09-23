@@ -1,5 +1,5 @@
 """
-매일 1회 실행되는 승하차 수집 파이프라인 진입점 (GitHub Actions daily_ridership.yml 에서 호출).
+승하차 수집 파이프라인 수동 진입점. 정기 실행은 back.pipelines.refresh를 사용한다.
 
 직접 실행:
   python back/pipelines/daily_ridership/run_daily.py                        # 어제
@@ -9,9 +9,7 @@
 승하차는 적재 지연이 있어 어제치가 아직 안 떴을 수 있다. 미적재 날짜는 건너뛰며(에러 아님),
 Actions 는 최근 며칠치를 덮어쓰며 돌려 빠진 날을 자동으로 메꾼다.
 
-일시적 네트워크 오류(타임아웃 등)는 워크플로 실패로 치지 않는다 — 자가복구 윈도우가 다음 실행에서
-같은 날짜를 다시 시도하므로, 매번 빨간불을 띄울 만한 사고가 아니다. 그 외 오류(코드/데이터 문제)는
-그대로 실패 처리해 눈에 띄게 한다.
+네트워크·인증·데이터 오류는 실패로 반환하며 기존 관측값을 보존한다.
 """
 import argparse
 import sys
@@ -21,15 +19,19 @@ from pathlib import Path
 from urllib.error import URLError
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from scraper import scrape
+from back.pipelines.common import RUNTIME, collection_lock, today
 
 
 def run(start: date | None = None, end: date | None = None) -> bool:
     if start is None:
-        start = date.today() - timedelta(days=1)
+        start = today() - timedelta(days=1)
     if end is None:
         end = start
+    if start > end:
+        raise ValueError("start must be on or before end")
 
     print("=" * 50)
     print(f"[승하차 파이프라인 시작] 대상: {start} ~ {end}")
@@ -42,8 +44,8 @@ def run(start: date | None = None, end: date | None = None) -> bool:
             path = scrape(day)
             print(f"  {day} → {path}" if path else f"  {day}: API 미적재 → 건너뜀")
         except (URLError, TimeoutError, OSError) as e:
-            # 일시적 네트워크 오류 — 자가복구 윈도우가 다음 실행에서 재시도하므로 실패 처리하지 않음
-            print(f"  ⚠ {day} 네트워크 오류(다음 실행에서 자동 재시도): {e}")
+            print(f"  {day}: collection failed ({type(e).__name__}); prior data preserved")
+            ok = False
         except Exception as e:
             print(f"  ❌ {day} 수집 실패: {e}")
             traceback.print_exc()
@@ -63,4 +65,5 @@ if __name__ == "__main__":
     args = parser.parse_args()
     s = date.fromisoformat(args.start) if args.start else None
     e = date.fromisoformat(args.end) if args.end else None
-    sys.exit(0 if run(s, e) else 1)
+    with collection_lock(RUNTIME):
+        sys.exit(0 if run(s, e) else 1)

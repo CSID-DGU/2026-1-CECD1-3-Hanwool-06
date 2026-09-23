@@ -4,21 +4,43 @@ import os
 from pathlib import Path
 
 import requests
+from bs4 import BeautifulSoup
 from dotenv import load_dotenv
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+from .parser import discover_mkeys
 
 
 BASE = "https://i121.seoul.go.kr"
-LOGIN_FORM_URL = f"{BASE}/cs/cyber/front/login/NR_loginForm.do"
-LOGIN_ACTION_URL = f"{BASE}/cs/cyber/front/login/AR_loginAction.do"
-MYARISU_URL = f"{BASE}/cs/cyber/front/mypage/NR_myArisu.do"
+LOGIN_FORM_URL = f"{BASE}/cyber/front/login/NR_loginForm.do"
+LOGIN_ACTION_URL = f"{BASE}/cyber/front/login/AR_loginAction.do"
+MYARISU_URL = f"{BASE}/cyber/front/mypage/NR_myArisu.do"
 
 
 class LoginError(RuntimeError):
     pass
 
 
+class ConfigurationError(LoginError):
+    pass
+
+
+class CustomerAccessError(RuntimeError):
+    pass
+
+
+def ensure_customer_access(session, customer):
+    allowed = getattr(session, 'arisu_customer_numbers', None)
+    if isinstance(allowed, frozenset) and customer not in allowed:
+        raise CustomerAccessError('Customer is not registered in this Arisu account')
+
+
 def _new_session() -> requests.Session:
     s = requests.Session()
+    retries = Retry(total=3, backoff_factor=1, status_forcelist=(429, 500, 502, 503, 504),
+                    allowed_methods={"GET", "POST"})
+    s.mount("https://", HTTPAdapter(max_retries=retries))
     s.headers.update(
         {
             "User-Agent": (
@@ -31,6 +53,16 @@ def _new_session() -> requests.Session:
     return s
 
 
+def update_csrf(session, html):
+    """Use the site's issued CSRF token; refresh after login rotates the session."""
+    soup = BeautifulSoup(html, 'html.parser')
+    fields = {name: soup.find('meta', attrs={'name': name}) for name in ('_csrf', '_csrf_header', '_csrf_parameter')}
+    values = {name: element.get('content', '') if element else '' for name, element in fields.items()}
+    if values['_csrf'] and values['_csrf_header']:
+        session.headers[values['_csrf_header']] = values['_csrf']
+    return {values['_csrf_parameter']: values['_csrf']} if values['_csrf_parameter'] and values['_csrf'] else {}
+
+
 def login(user_id: str, user_pwd: str, *, timeout: float = 30.0) -> requests.Session:
     """Perform form login and return an authenticated session.
 
@@ -41,53 +73,62 @@ def login(user_id: str, user_pwd: str, *, timeout: float = 30.0) -> requests.Ses
 
     session = _new_session()
 
-    # Prime cookies on the login form
-    r = session.get(LOGIN_FORM_URL, params={"_m": "m7"}, timeout=timeout)
-    r.raise_for_status()
-
-    # Submit credentials
-    r = session.post(
-        LOGIN_ACTION_URL,
-        data={"userId": user_id, "userPwd": user_pwd},
-        headers={
-            "X-Requested-With": "XMLHttpRequest",
-            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-            "Referer": f"{LOGIN_FORM_URL}?_m=m7",
-            "Origin": BASE,
-            "Accept": "*/*",
-        },
-        timeout=timeout,
-    )
-    r.raise_for_status()
-    login_body = r.text.strip()
-
-    # Verify by hitting a member-only page
-    verify = session.get(MYARISU_URL, params={"_m": "m6"}, timeout=timeout)
-    verify.raise_for_status()
-    if _looks_like_login_page(verify.text) or "NR_loginForm.do" in verify.url:
-        raise LoginError(
-            f"login appears to have failed; "
-            f"login_action_body={login_body!r}; verify_url={verify.url!r}"
+    try:
+        r = session.get(LOGIN_FORM_URL, params={"_m": "m7"}, timeout=timeout)
+        r.raise_for_status()
+        csrf = update_csrf(session, r.text)
+        if not csrf:
+            raise LoginError('Arisu login form does not contain its required CSRF token')
+        r = session.post(
+            LOGIN_ACTION_URL,
+            data={"mbrId": user_id, "pwd": user_pwd, "mbrTypeCd": "01", **csrf},
+            headers={"X-Requested-With": "XMLHttpRequest", "Referer": LOGIN_FORM_URL,
+                     "Origin": BASE, "Accept": "*/*"},
+            timeout=timeout,
         )
-    return session
+        r.raise_for_status()
+        if r.text.strip().split('|')[0] != '200':
+            raise LoginError('Arisu requires account verification or rejected the supplied login')
+        verify = session.get(MYARISU_URL, params={"_m": "m6"}, timeout=timeout)
+        verify.raise_for_status()
+        if _looks_like_login_page(verify.text) or "NR_loginForm.do" in verify.url:
+            raise LoginError('Arisu session verification failed')
+        update_csrf(session, verify.text)
+        if BeautifulSoup(verify.text, 'html.parser').select_one('select[name="searchMkey"], select#selfTestcusNum'):
+            session.arisu_customer_numbers = frozenset(discover_mkeys(verify.text))
+        return session
+    except Exception:
+        session.close()
+        raise
 
 
 def _looks_like_login_page(html: str) -> bool:
-    markers = ("name=\"userId\"", "name=\"userPwd\"", "로그인이 필요")
-    return any(m in html for m in markers)
+    soup = BeautifulSoup(html, 'html.parser')
+    return bool(soup.select_one('input[name="userId"], input[name="userPwd"], input[name="mbrId"], input[name="pwd"]'))
 
 
 def session_from_env(env_path: Path | str | None = None) -> requests.Session:
-    """Load I121_USER_ID / I121_USER_PWD from .env and log in."""
+    """ARISU credentials; I121 names remain accepted for older installations."""
     if env_path is not None:
-        load_dotenv(dotenv_path=env_path, override=True)
+        load_dotenv(dotenv_path=env_path, override=False)
     else:
         load_dotenv(override=False)
-    user_id = os.environ.get("I121_USER_ID", "").strip()
-    user_pwd = os.environ.get("I121_USER_PWD", "").strip()
+    user_id = (os.environ.get("ARISU_USER_ID") or os.environ.get("I121_USER_ID", "")).strip()
+    user_pwd = os.environ.get("ARISU_USER_PWD") or os.environ.get("I121_USER_PWD", "")
     if not user_id or not user_pwd:
-        raise LoginError(
+        raise ConfigurationError(
             "missing credentials; copy .env.example to .env and set "
-            "I121_USER_ID / I121_USER_PWD"
+            "ARISU_USER_ID / ARISU_USER_PWD"
         )
     return login(user_id, user_pwd)
+
+
+def collection_session(env_path=None):
+    """A member-login failure must not prevent public customer/name bill lookup."""
+    try:
+        return session_from_env(env_path)
+    except (LoginError, requests.RequestException) as exc:
+        session = _new_session()
+        session.arisu_customer_numbers = frozenset()
+        session.arisu_login_error = type(exc).__name__
+        return session

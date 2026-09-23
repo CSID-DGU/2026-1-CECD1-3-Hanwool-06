@@ -299,7 +299,9 @@ def main() -> int:
     bills["napgi_year_month"] = bills["napgi_date"].dt.strftime("%Y-%m")
     bills["total_usage_ton"] = bills["total_usage_ton"].astype(float)
     bills["bugwa_amount_won"] = bills["bugwa_amount_won"].astype(float)
-    bills["monthly_avg_ton"] = bills["total_usage_ton"] / 2.0
+    gaps = bills.sort_values("napgi_date").groupby("mkey")["napgi_date"].apply(lambda s: s.diff().dt.days.median())
+    cycles = {key: 1 if pd.notna(gap) and gap < 40 else 2 for key, gap in gaps.items()}
+    bills["monthly_avg_ton"] = bills["total_usage_ton"] / bills["mkey"].map(cycles)
     slim_cols = [
         "mkey", "station", "office", "usage_type", "bill_name",
         "napgi", "napgi_year", "napgi_month", "napgi_year_month",
@@ -325,7 +327,7 @@ def main() -> int:
         m1 = int(row.napgi_month)
         m0 = m1 - 1 if m1 > 1 else 12
         per_month = row.monthly_avg_ton
-        for m in (m0, m1):
+        for m in ((m1,) if cycles[row.mkey] == 1 else (m0, m1)):
             attrib_records.append(
                 {
                     "mkey": row.mkey,

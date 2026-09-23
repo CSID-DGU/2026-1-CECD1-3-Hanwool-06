@@ -19,7 +19,7 @@ import pandas as pd
 
 
 ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_DAILY = ROOT / "data" / "raw" / "daily_water_usage"
+DEFAULT_DAILY = ROOT / "data" / "arisu_station_history"
 DEFAULT_MATCH = ROOT / "data" / "billing" / "meter_match.csv"
 DEFAULT_OUT = ROOT / "data" / "processed" / "daily_usage_long.csv"
 
@@ -87,6 +87,8 @@ def main() -> int:
         parts.append(df)
     if unmatched:
         print(f"  WARNING: {len(unmatched)} csvs not in meter_match → {unmatched[:5]}")
+    if not parts:
+        raise ValueError(f"No source readings in {args.daily_dir}")
     daily = pd.concat(parts, ignore_index=True)
     print(f"  combined rows: {len(daily):,}")
 
@@ -105,6 +107,7 @@ def main() -> int:
     daily = daily.sort_values(
         ["역명", "호선", "용도", "검침일"], na_position="last"
     ).reset_index(drop=True)
+    args.out_path.parent.mkdir(parents=True, exist_ok=True)
     daily.to_csv(args.out_path, index=False, encoding="utf-8-sig")
     print(f"  rows: {len(daily):,}")
     print(f"  unique 일일CSV파일명: {daily['일일CSV파일명'].nunique()}")

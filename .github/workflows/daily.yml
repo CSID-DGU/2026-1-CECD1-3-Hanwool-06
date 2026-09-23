@@ -1,53 +1,70 @@
-name: 일별 상수도 사용량 수집
+name: Private data refresh
 
 on:
-  schedule:
-    - cron: '1 23,0,1 * * *'  # KST 08:01·09:01·10:01 (UTC 23:01·00:01·01:01) — :01분으로 정시 혼잡 회피, 미적재면 재시도+dedup 패스
-  workflow_dispatch:       # 수동 실행 버튼도 활성화
+  workflow_dispatch:
+    inputs:
+      start:
+        description: 'First KST observation date (YYYY-MM-DD; blank = recent 5 days)'
+        required: false
+      end:
+        description: 'Last KST observation date (YYYY-MM-DD; blank = yesterday)'
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jongsul-private-refresh
+  cancel-in-progress: false
 
 jobs:
-  run-pipeline:
-    runs-on: ubuntu-latest
-
+  refresh:
+    # Provision a trusted runner with persistent private storage and the registered-contract DB.
+    runs-on: self-hosted
+    env:
+      TZ: Asia/Seoul
+      MPLBACKEND: Agg
+      APP_DATA_DIR: ${{ vars.APP_DATA_DIR }}
+      APP_DB_PATH: ${{ vars.APP_DB_PATH }}
+      ARISU_USER_ID: ${{ secrets.ARISU_USER_ID }}
+      ARISU_USER_PWD: ${{ secrets.ARISU_USER_PWD }}
+      SEOUL_PSGR_KEY: ${{ secrets.SEOUL_PSGR_KEY }}
+      START_DATE: ${{ inputs.start }}
+      END_DATE: ${{ inputs.end }}
     steps:
-      - name: 코드 체크아웃
-        uses: actions/checkout@v4
-
-      - name: Python 설치
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          # Validate the storage path before any cleanup of untracked local data.
+          clean: false
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
-
-      - name: 패키지 설치
-        run: pip install -r back/pipelines/daily_water/requirements.txt
-
-      - name: .env 생성
+      - name: Validate private persistent storage
         run: |
-          echo "ARISU_USER_ID=${{ secrets.ARISU_USER_ID }}" >> .env
-          echo "ARISU_USER_PWD=${{ secrets.ARISU_USER_PWD }}" >> .env
-
-      - name: 파이프라인 실행
-        run: python back/pipelines/daily_water/run_daily.py
-
-      - name: 결과 커밋
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          value = os.environ.get('APP_DATA_DIR')
+          if not value:
+              raise SystemExit('Set APP_DATA_DIR to persistent storage outside this checkout')
+          root = Path(value).resolve()
+          checkout = Path.cwd().resolve()
+          if root == checkout or checkout in root.parents:
+              raise SystemExit('APP_DATA_DIR must be outside the checkout')
+          db_value = os.environ.get('APP_DB_PATH')
+          db = Path(db_value) if db_value else root / 'app.sqlite3'
+          if not db.is_file():
+              raise SystemExit('Initialize the application and register contracts before collection')
+          root.mkdir(parents=True, exist_ok=True)
+          PY
+      - name: Install dependencies
         run: |
-          DATE=$(python3 -c "from datetime import date, timedelta; print(date.today() - timedelta(days=1))")
-          CSV="data/daily/water/${DATE}.csv"
-
-          # CSV를 임시 저장 후 원본 삭제 (브랜치 전환 충돌 방지)
-          cp "${CSV}" "/tmp/${DATE}.csv"
-          rm "${CSV}"
-
-          # daily-collect 브랜치로 전환
-          git fetch origin daily-collect
-          git switch daily-collect
-          mkdir -p data/daily/water
-          cp "/tmp/${DATE}.csv" "${CSV}"
-
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add "${CSV}"
-          git diff --staged --quiet || git commit -m "data: ${DATE} 일일 상수도 사용량 자동 수집"
-          git pull --rebase origin daily-collect || true   # 승하차 잡과 동시 푸시 경합 대비
-          git push origin daily-collect
+          python -m pip install -r back/api/requirements.txt -r back/pipelines/requirements.txt
+      - name: Refresh registered contracts and private model snapshot
+        shell: bash
+        run: |
+          args=(--all)
+          if [[ -n "$START_DATE" ]]; then args+=(--start "$START_DATE"); fi
+          if [[ -n "$END_DATE" ]]; then args+=(--end "$END_DATE"); fi
+          python -m back.pipelines.refresh "${args[@]}"

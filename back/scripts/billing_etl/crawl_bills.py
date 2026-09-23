@@ -1,14 +1,8 @@
 #!/usr/bin/env python3
-"""Crawl all bills for every mkey using backward 1-year windows.
+"""Collect registered contracts' bills for an explicit month range into private storage.
 
-For each mkey:
-  - Start from end_ym = today (YYYY-MM) and step backwards by 12-month windows.
-  - Stop when a window returns no bills (empty 부과내역 table).
-  - Raw HTML is cached so re-runs skip already-fetched windows.
-
-Outputs:
-  data/raw/billing_i121/i121_bills/bills_long.csv   one row per bill, sorted by (mkey, napgi)
-  data/raw/billing_i121/i121_bills/crawl_summary.json  per-mkey stats
+Recent cache windows are refreshed; empty windows never stop historical backfill.
+Existing observations survive partial failures and regular/supplementary bills remain distinct.
 """
 
 from __future__ import annotations
@@ -18,20 +12,24 @@ import csv
 import json
 import sys
 import time
-from datetime import datetime
+from datetime import date
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
-RAW_DIR = ROOT / "data" / "raw" / "billing_i121"
+sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from i121_crawler.auth import session_from_env  # noqa: E402
-from i121_crawler.fetch import fetch_bill_window, shift_month  # noqa: E402
-from i121_crawler.parser import parse_bill_list  # noqa: E402
+from back.scripts.billing_etl.i121_crawler.auth import collection_session  # noqa: E402
+from back.pipelines.common import RUNTIME, collection_lock, collector_meters, customer_number, merge_csv, write_json, today
+from back.scripts.billing_etl.i121_crawler.fetch import fetch_bill_window, shift_month  # noqa: E402
+from back.scripts.billing_etl.i121_crawler.parser import parse_bill_list
+from back.scripts.billing_etl.i121_crawler.public import fetch_public_window, PublicCustomerNameError  # noqa: E402
+RAW_DIR = RUNTIME / "raw" / "billing_i121"
 
 
 FIELDNAMES = [
     "mkey",
+    "notice_number",
     "sunbeon",
     "gubun",
     "napgi",
@@ -41,128 +39,111 @@ FIELDNAMES = [
     "total_usage_ton",
     "station_from_address",
     "address",
+    "details",
+    "detail_source",
 ]
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--mkeys-path", type=Path, default=RAW_DIR / "i121_mkeys.json")
+    parser.add_argument("--mkeys-path", type=Path, help="optional explicit customer-number JSON; defaults to the current meter registry")
     parser.add_argument("--cache-dir", type=Path, default=RAW_DIR / "i121_cache")
     parser.add_argument("--out-dir", type=Path, default=RAW_DIR / "i121_bills")
     parser.add_argument("--env-path", type=Path, default=ROOT / ".env")
     parser.add_argument("--sleep", type=float, default=1.5, help="seconds to sleep between live fetches")
     parser.add_argument("--floor-year", type=int, default=2008, help="stop iterating below this year")
-    parser.add_argument("--max-windows-per-mkey", type=int, default=30, help="safety cap on windows per mkey")
     parser.add_argument("--max-mkeys", type=int, default=None, help="limit to first N mkeys (debug)")
     parser.add_argument("--end-ym", type=str, default=None, help="latest YYYY-MM to start from (default: today)")
+    parser.add_argument("--start-ym", type=str, default=None)
     return parser.parse_args()
+
+
+def collect_bills(*, start_ym, end_ym, mkeys=None, session=None, cache_dir=None, out_dir=None, sleep=1.5, include_rows=False, customer_names=None, known_details=None):
+    if start_ym > end_ym:
+        raise ValueError("start month must be before end month")
+    customer_names = dict(customer_names or {})
+    if mkeys is None:
+        meters = collector_meters(daily=False)
+        mkeys = [m["customer_number"] for m in meters]
+        for meter in meters:
+            customer_names.setdefault(meter["customer_number"], meter.get("metadata", {}).get("arisu_customer_name", ""))
+    customer_names = {customer_number(k): str(v).strip() for k, v in customer_names.items() if v}
+    mkeys = sorted({customer_number(k) for k in mkeys})
+    if not mkeys:
+        raise ValueError("No registered Arisu contracts")
+    cache_dir = Path(cache_dir or RAW_DIR / "i121_cache")
+    out_dir = Path(out_dir or RAW_DIR / "i121_bills")
+    session = session or collection_session(ROOT / ".env")
+    bills, errors = [], []
+    for mkey in mkeys:
+        window_end = end_ym
+        while window_end >= start_ym:
+            window_start = max(start_ym, shift_month(window_end, -11))
+            try:
+                force = window_end >= shift_month(today().strftime("%Y-%m"), -2)
+                if customer_names.get(mkey):
+                    rows, cached, detail_errors = fetch_public_window(session, mkey, customer_names[mkey],
+                        window_start, window_end, cache_dir, force=force, known_details=known_details)
+                    errors.extend(detail_errors)
+                else:
+                    html, cached = fetch_bill_window(session, mkey, window_start, window_end, cache_dir, force=force)
+                    rows = parse_bill_list(html, customer=mkey)
+                for bill in rows:
+                    bill["mkey"] = customer_number(bill["mkey"])
+                    if bill["mkey"] != mkey:
+                        raise ValueError("Bill customer does not match requested contract")
+                    date.fromisoformat(bill["napgi"])
+                    bills.append(bill)
+                if not cached and sleep:
+                    time.sleep(sleep)
+            except Exception as exc:
+                errors.append({"customer_number": mkey, "start": window_start,
+                               "end": window_end, "error": type(exc).__name__})
+                if isinstance(exc, PublicCustomerNameError):
+                    break
+            window_end = shift_month(window_start, -1)
+    # Regular and supplementary bills can share a due date; retain both.
+    path = out_dir / "bills_long.csv"
+    keys = ["mkey", "napgi", "gubun", "notice_number"]
+    previous = {}
+    if path.exists():
+        with path.open(encoding="utf-8-sig", newline="") as stream:
+            previous = {tuple(row.get(k, "") for k in keys): row for row in csv.DictReader(stream)}
+    stored_rows = []
+    for bill in bills:
+        stored = dict(bill)
+        old = previous.get(tuple(str(bill.get(k, "")) for k in keys), {})
+        for field in ("details", "detail_source", "address", "station_from_address", "total_usage_ton"):
+            if stored.get(field) is None or stored.get(field) == "":
+                if old.get(field):
+                    stored[field] = old[field]
+        if isinstance(stored.get("details"), dict):
+            stored["details"] = json.dumps(stored["details"], ensure_ascii=False, allow_nan=False)
+        stored_rows.append(stored)
+    count = merge_csv(path, stored_rows, FIELDNAMES, keys)
+    report = {"start": start_ym, "end": end_ym, "customers": len(mkeys),
+              "fetched": len(bills), "total": count, "errors": errors,
+              "status": "failed" if errors else "complete"}
+    write_json(out_dir / "crawl_summary.json", report)
+    return report | {"rows": bills} if include_rows else report
 
 
 def main() -> int:
     args = parse_args()
-    args.cache_dir.mkdir(parents=True, exist_ok=True)
-    args.out_dir.mkdir(parents=True, exist_ok=True)
-
-    mkeys: list[str] = json.loads(args.mkeys_path.read_text(encoding="utf-8"))
-    if args.max_mkeys:
-        mkeys = mkeys[: args.max_mkeys]
-
-    if args.env_path.exists():
-        session = session_from_env(env_path=args.env_path)
-    else:
-        session = session_from_env()
-    print(f"login ok — crawling {len(mkeys)} mkeys", flush=True)
-
-    today = datetime.now()
-    start_end_ym = args.end_ym or f"{today.year:04d}-{today.month:02d}"
-
-    seen: set[tuple[str, str]] = set()
-    all_bills: list[dict] = []
-    summary: dict[str, dict] = {}
-    fetches_live = 0
-    fetches_cached = 0
-
-    for index, mkey in enumerate(mkeys, 1):
-        per_count = 0
-        per_windows = 0
-        oldest: str | None = None
-        latest: str | None = None
-        end_ym = start_end_ym
-
-        for _ in range(args.max_windows_per_mkey):
-            start_ym = shift_month(end_ym, -11)
-            if int(start_ym.split("-")[0]) < args.floor_year:
-                break
-
-            try:
-                html, was_cached = fetch_bill_window(
-                    session, mkey, start_ym, end_ym, args.cache_dir
-                )
-            except Exception as exc:
-                print(
-                    f"  [{index}/{len(mkeys)}] mkey={mkey} window={start_ym}~{end_ym} "
-                    f"FAILED: {type(exc).__name__}: {exc}",
-                    flush=True,
-                )
-                break
-
-            per_windows += 1
-            if was_cached:
-                fetches_cached += 1
-            else:
-                fetches_live += 1
-                time.sleep(args.sleep)
-
-            bills = parse_bill_list(html)
-            if not bills:
-                break
-
-            for bill in bills:
-                key = (bill["mkey"], bill.get("napgi_compact") or bill.get("napgi") or "")
-                if key in seen:
-                    continue
-                seen.add(key)
-                all_bills.append(bill)
-                per_count += 1
-                napgi = bill.get("napgi")
-                if napgi:
-                    if oldest is None or napgi < oldest:
-                        oldest = napgi
-                    if latest is None or napgi > latest:
-                        latest = napgi
-
-            end_ym = shift_month(start_ym, -1)
-
-        summary[mkey] = {
-            "bills": per_count,
-            "windows": per_windows,
-            "oldest_napgi": oldest,
-            "latest_napgi": latest,
-        }
-        print(
-            f"  [{index:2d}/{len(mkeys)}] mkey={mkey} "
-            f"bills={per_count:3d} windows={per_windows:2d} range={oldest}~{latest}",
-            flush=True,
-        )
-
-    csv_path = args.out_dir / "bills_long.csv"
-    with csv_path.open("w", encoding="utf-8-sig", newline="") as fp:
-        writer = csv.DictWriter(fp, fieldnames=FIELDNAMES)
-        writer.writeheader()
-        for bill in sorted(all_bills, key=lambda b: (b["mkey"], b.get("napgi_compact") or "")):
-            writer.writerow({k: bill.get(k) for k in FIELDNAMES})
-
-    summary_path = args.out_dir / "crawl_summary.json"
-    summary_path.write_text(
-        json.dumps(summary, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-
-    print()
-    print(f"saved {len(all_bills)} bills → {csv_path.relative_to(ROOT)}")
-    print(f"saved summary → {summary_path.relative_to(ROOT)}")
-    print(f"fetches: live={fetches_live} cached={fetches_cached}")
-    return 0
+    meters = collector_meters(daily=False)
+    names = {m["customer_number"]: m.get("metadata", {}).get("arisu_customer_name", "") for m in meters}
+    mkeys = json.loads(args.mkeys_path.read_text(encoding="utf-8")) if args.mkeys_path else list(names)
+    if args.max_mkeys is not None:
+        if args.max_mkeys < 1:
+            raise ValueError("max-mkeys must be positive")
+        mkeys = mkeys[:args.max_mkeys]
+    with collection_lock(RUNTIME):
+        report = collect_bills(start_ym=args.start_ym or f"{args.floor_year}-01",
+            end_ym=args.end_ym or today().strftime("%Y-%m"), mkeys=mkeys,
+            cache_dir=args.cache_dir, out_dir=args.out_dir, sleep=args.sleep,
+            session=collection_session(args.env_path), customer_names=names)
+    print(report)
+    return 1 if report["errors"] else 0
 
 
 if __name__ == "__main__":

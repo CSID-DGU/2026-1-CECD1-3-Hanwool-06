@@ -3,11 +3,12 @@ import EmptyState from "./EmptyState.jsx";
 import LineBadges from "./LineBadges.jsx";
 import RiskBadge from "./RiskBadge.jsx";
 import SectionTitle from "./SectionTitle.jsx";
+import { detailHref } from "../../Detail/data.js";
 
-export default function StationTable({ stations }) {
+export default function StationTable({ stations, billingOnly = false }) {
   return (
     <section className="table-panel">
-      <SectionTitle title="역별 관제 목록" right={`${stations.length}개 역`} />
+      <SectionTitle title={billingOnly ? "청구 전용 계량기 목록" : "계량기별 관제 목록"} right={`${stations.length}개 계량기`} />
       <div className="table-wrap">
         <table className="station-table">
           <thead>
@@ -15,18 +16,17 @@ export default function StationTable({ stations }) {
               <th>역명</th>
               <th>호선</th>
               <th>영업사업소</th>
-              <th>위험도</th>
-              <th>일 사용량</th>
-              <th>예측대비</th>
-              <th>수집시각</th>
+              <th>{billingOnly ? "제공 자료" : "위험도 · 상태"}</th>
+              {!billingOnly && <><th>일 사용량</th><th>예측대비</th></>}
+              <th>{billingOnly ? "최근 청구월" : "사용량 / 분석 기준일"}</th>
             </tr>
           </thead>
           <tbody>
             {stations.map((station) => (
               <tr key={station.id}>
                 <td>
-                  <strong>{station.name}</strong>
-                  <small>{station.customerNo}</small>
+                  <a className="station-link" href={detailHref(station.id)}><strong>{station.name}</strong></a>
+                  <small>{station.displayName} · {station.customerNo}</small>
                 </td>
                 <td>
                   <LineBadges lines={station.lines} />
@@ -34,13 +34,13 @@ export default function StationTable({ stations }) {
                 <td>{station.office}</td>
                 <td>
                   <RiskBadge risk={station.risk} />
+                  {station.riskDetail && <small>{station.riskDetail}</small>}
                 </td>
-                <td>{formatNumber(station.usage)} 톤</td>
+                {!billingOnly && <><td>{formatNumber(station.usage)} 톤</td>
                 <td className={station.delta >= 10 ? "delta-up" : station.delta < 0 ? "delta-down" : ""}>
-                  {station.delta > 0 ? "+" : ""}
-                  {station.delta}%
-                </td>
-                <td>{station.checkedAt.slice(5)}</td>
+                  {station.delta == null ? "—" : `${station.delta > 0 ? "+" : ""}${station.delta}%`}
+                </td></>}
+                <td>{billingOnly ? station.latestBillMonth || "청구자료 없음" : <><span>사용량 {station.dailyDate || "수집 전"}</span><small>분석 {station.riskDate || "분석 대기"}</small></>}</td>
               </tr>
             ))}
           </tbody>

@@ -1,47 +1,39 @@
-"""환경설정 로딩. 모든 시크릿/경로는 여기 한 곳에서만 읽는다."""
+"""Server-only settings; environment variables take precedence over .env."""
 import os
 from pathlib import Path
-
 from dotenv import load_dotenv
 
-# back/api/config.py -> 프로젝트 루트는 2단계 위
 ROOT = Path(__file__).resolve().parents[2]
-load_dotenv(ROOT / ".env", override=True)  # .env 를 셸 환경변수보다 우선 (TODAY_OVERRIDE 등 stale 값 방지)
+load_dotenv(ROOT / '.env')
+DATA_DIR = Path(os.getenv('APP_DATA_DIR') or ROOT / 'data/runtime').resolve()
+APP_DB_PATH = Path(os.getenv('APP_DB_PATH') or DATA_DIR / 'app.sqlite3').resolve()
+SEED_DIR = ROOT / 'data/app_seed'
+APP_ENV = os.getenv('APP_ENV', 'development')
+COOKIE_SECURE = os.getenv('APP_COOKIE_SECURE', str(APP_ENV == 'production')).lower() == 'true'
+SESSION_HOURS = int(os.getenv('SESSION_HOURS', '8'))
+ADMIN_EMAIL = os.getenv('ADMIN_EMAIL', '').strip().lower()
+ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', '')
+ADMIN_NAME = os.getenv('ADMIN_NAME', '총괄 관리자').strip()
+FRONT_ORIGINS = [v.strip() for v in os.getenv('APP_ORIGINS', 'http://127.0.0.1:5173,http://localhost:5173,http://127.0.0.1:8000,http://localhost:8000').split(',') if v.strip()]
+ALLOWED_HOSTS = [v.strip() for v in os.getenv('APP_ALLOWED_HOSTS', '127.0.0.1,localhost,testserver').split(',') if v.strip()]
+OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
+OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-5.5')
+SMTP_HOST = os.getenv('SMTP_HOST', 'smtp.gmail.com')
+SMTP_PORT = int(os.getenv('SMTP_PORT', '587'))
+SMTP_USER = os.getenv('SMTP_USER', '')
+SMTP_PASS = os.getenv('SMTP_PASS', '')
+ALERT_FROM = os.getenv('ALERT_FROM', '') or SMTP_USER
+ALERT_TO = ''  # Recipients are resolved from the authorized office, never from a request.
+TODAY_OVERRIDE = os.getenv('TODAY_OVERRIDE', '').strip()
+COLLECTION_WORKER_ENABLED = os.getenv('COLLECTION_WORKER_ENABLED', 'true').lower() == 'true'
+DATE_INDEX = ROOT / 'data/processed/date_index.csv'
+BILLS_CLEAN = ROOT / 'data/billing/bills_clean.csv'
 
-# ── OpenAI (에이전트) ──────────────────────────────────────────────
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.5")  # .env 로 교체 가능
+def configured(value):
+    return bool(value and not value.lower().startswith(('your_', 'sk-...')))
 
-# ── 메일 발송 (Gmail SMTP) ─────────────────────────────────────────
-SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
-SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
-SMTP_USER = os.getenv("SMTP_USER", "")
-SMTP_PASS = os.getenv("SMTP_PASS", "")  # Gmail 앱 비밀번호
-ALERT_FROM = os.getenv("ALERT_FROM", "") or SMTP_USER
-ALERT_TO = os.getenv("ALERT_TO", "")  # 기본 수신처(콤마로 다중 가능)
+def openai_ready():
+    return configured(OPENAI_API_KEY)
 
-# ── 데모 기준일 ────────────────────────────────────────────────────
-# 비우면 이상탐지 CSV 의 가장 최근 날짜를 '오늘'로 사용한다.
-TODAY_OVERRIDE = os.getenv("TODAY_OVERRIDE", "").strip()
-
-# ── 데이터 경로 ────────────────────────────────────────────────────
-# 위험도 실데이터: risk.json 과 동일한 라이브 소스(06-13까지)를 본다.
-RESULTS = ROOT / "analysis" / "risk_snapshot" / "scripts" / "LightGBM_Model" / "results"
-ANOMALIES_FLAGGED = RESULTS / "test_anomalies.csv"
-ANOMALIES_ALL = RESULTS / "test_anomalies.csv"
-DATE_INDEX = ROOT / "data" / "processed" / "date_index.csv"
-BILLS_CLEAN = ROOT / "data" / "billing" / "bills_clean.csv"
-
-# 프론트(개발 서버) 출처 — CORS 허용용
-FRONT_ORIGINS = [
-    "http://127.0.0.1:5173",
-    "http://localhost:5173",
-]
-
-
-def openai_ready() -> bool:
-    return bool(OPENAI_API_KEY)
-
-
-def smtp_ready() -> bool:
-    return bool(SMTP_USER and SMTP_PASS)
+def smtp_ready():
+    return configured(SMTP_USER) and configured(SMTP_PASS)

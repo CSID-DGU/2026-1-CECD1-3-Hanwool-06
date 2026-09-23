@@ -42,7 +42,7 @@ postprocess:
 
 # ── LightGBM 하이퍼파라미터 ───────────────────────────────────────
 model:
-  device: cuda            # 학습 장치: cuda=GPU. CPU 로 돌리려면 이 줄을 지우거나 cpu 로.
+  device: cpu            # 학습 장치: cuda=GPU. CPU 로 돌리려면 이 줄을 지우거나 cpu 로.
   objective: regression_l1  # 손실함수 L1(MAE) — 이상치에 강함(제곱이 아니라 절대값)
   n_estimators: 1000      # 부스팅 트리 개수(최대). 조기종료가 있으면 더 일찍 멈출 수 있음
   learning_rate: 0.025    # 학습률. 작을수록 천천히·안정적으로 학습(트리 수는 늘려야 함)

@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState } from "react";
+import { chartRange } from "./data.js";
 
 // 의존성 없는 SVG 라인차트.
 // 컨테이너 실제 너비를 측정해 viewBox=픽셀 1:1 로 그림 → 폭이 달라도 글씨 크기·여백이 일정.
@@ -35,12 +36,9 @@ export default function LineChart({
   const padT = showValues ? 28 : 16;
   const padB = 40;
 
-  const all = series.flatMap((s) => s.values).filter((v) => Number.isFinite(v));
-  const rawMin = all.length ? Math.min(...all) : 0;
-  const rawMax = all.length ? Math.max(...all) : 1;
-  const span = rawMax - rawMin || 1;
-  const lo = rawMin - span * 0.14;
-  const hi = rawMax + span * (showValues ? 0.2 : 0.14);
+  const range = chartRange(series.flatMap((s) => s.values), showValues);
+  if (!range) return <div ref={wrapRef} className="dt-empty">해당 기간의 차트 자료가 없습니다.</div>;
+  const { lo, hi } = range;
   const n = series[0].values.length;
 
   const slot = (W - padL - padR) / n;
@@ -74,7 +72,7 @@ export default function LineChart({
 
   return (
     <div ref={wrapRef} className="dt-chart-wrap">
-      <svg className="dt-chart" width={W} height={H} viewBox={`0 0 ${W} ${H}`} role="img">
+      <svg className="dt-chart" width={W} height={H} viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`${xLabels[0] || ''}부터 ${xLabels.at(-1) || ''}까지 ${yUnit} 추이`}>
         {yTicks.map((t, i) => (
           <g key={i}>
             <line x1={padL} x2={W - padR} y1={Y(t)} y2={Y(t)} className="dt-chart-grid" />
@@ -107,7 +105,7 @@ export default function LineChart({
             <path key={`l${si}`} d={line(s.values)} fill="none" stroke={s.color} strokeWidth="2.5" strokeLinejoin="round" />
           ))}
         {bars &&
-          series[0].values.map((v, i) => (
+          series[0].values.map((v, i) => Number.isFinite(v) ? (
             <rect
               key={`bar${i}`}
               x={X(i) - slot * 0.29}
@@ -118,7 +116,7 @@ export default function LineChart({
               fill={series[0].color}
               opacity="0.9"
             />
-          ))}
+          ) : null)}
         {series.map((s, si) =>
           s.values.map((v, i) =>
             showValues && Number.isFinite(v) ? (

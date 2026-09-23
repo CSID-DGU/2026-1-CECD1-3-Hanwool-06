@@ -1,8 +1,8 @@
 # data/billing/
 
-청구서(i121 크롤링) + 정답 매핑(Excel 3차검토)을 정제·결합한 결과 파일들. 모두 UTF-8-BOM + 한글 헤더.
+과거 청구서(i121 크롤링)와 검토 매핑(Excel 3차검토)을 정제·결합한 자료입니다. 현재 앱·모델이 재사용하는 아래 세 파일을 유지합니다. 모두 UTF-8-BOM + 한글 헤더입니다.
 
-생성 스크립트: `back/scripts/billing_etl/postprocess_bills.py`
+과거 생성 스크립트는 [`archive/back/scripts/billing_etl/postprocess_bills.py`](../../archive/back/scripts/billing_etl/postprocess_bills.py)에 보관했습니다. 새 수집 결과는 운영 DB와 `APP_DATA_DIR` 아래에 저장합니다.
 
 ---
 
@@ -50,47 +50,13 @@
 
 ---
 
-## station_month_baseline.csv : 역 × 12개월 시즌 통계 (948행)
+## 보관한 이전 결과
 
-- 역명 : 역 이름
-- 월 : 1~12
-- 관측수 : 해당 (역, 월) 버킷에 들어간 청구서 수
-- 중간값_톤 : median 월평균 사용량
-- 평균_톤 : mean
-- 25분위_톤 / 75분위_톤 : 분위수
-- 표준편차_톤 : std
-- IQR_톤 : 75분위 - 25분위
+다음 파일은 [`archive/data/billing/`](../../archive/data/billing/)에 있습니다. 현재 운영 파이프라인은 이 통계 파일을 읽지 않습니다.
 
-> 단위는 **월별** 톤. 일일과 비교하려면 ÷30.
+- `station_month_baseline.csv`: 역별 월 사용량의 과거 시즌 통계.
+- `mkey_month_baseline.csv`: 계량기별 월 사용량의 과거 시즌 통계.
+- `daily_csv_baseline.csv`: 위 통계를 일일 CSV 별칭으로 연결한 결과.
+- `postprocess_report.json`: 당시 매핑·정제 건수와 사용한 원자료를 기록한 보고서.
 
----
-
-## mkey_month_baseline.csv : 미터 × 12개월 시즌 통계 (960행)
-
-- 고객번호 : mkey
-- 역명 : 정답 역명
-- 월 : 1~12
-- 관측수 / 중간값_톤 / 평균_톤 / 25분위_톤 / 75분위_톤 / 표준편차_톤 / IQR_톤 : `station_month_baseline.csv`와 동일 의미, 미터 단위
-
----
-
-## daily_csv_baseline.csv : 일일CSV별로 join 가능한 baseline (960행)
-
-- 일일CSV파일명 : 매핑 키
-- 고객번호 : 해당 미터의 mkey
-- 역명 : 정규화 역명
-- 호선 : 정수 또는 빈값
-- 용도 : `시민용` / `직원용`
-- 월 : 1~12
-- 관측수 / 중간값_톤 / 평균_톤 / 25분위_톤 / 75분위_톤 / 표준편차_톤 / IQR_톤 : `mkey_month_baseline.csv`와 동일 값을 일일CSV파일명 키로 redistribute
-
----
-
-## postprocess_report.json : 청구서 정제 진단
-
-- review_xlsx : 사용된 Excel 파일명
-- crawled_mkeys : 크롤링된 mkey 수
-- mkey_station_mapped : 정답 매핑 성공 수 (80/80)
-- bills_initial / bills_after_gubun_filter / bills_clean_final : 필터링 단계별 행 수
-- station_month_baseline_rows / mkey_month_baseline_rows : 생성 baseline 행 수
-- meter_match_pairs / meter_match_reasons : 매칭 결과 분포
+현재 모델용 청구 집계는 `back.pipelines.refresh`가 공유 함수 `build_bills_bimonthly`를 호출해 생성합니다.

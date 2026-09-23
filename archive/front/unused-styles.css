@@ -1,0 +1,375 @@
+/* Archived unused frontend styles; not imported by the application. */
+
+/* Source: front/src/styles/index.css — replaced map, pins, calibration and schematic routes */
+.map-legend {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+  padding: 8px;
+  border: 1px solid rgba(226, 230, 239, 0.9);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: 0 6px 18px rgba(20, 30, 60, 0.08);
+}
+
+.metro-map {
+  position: relative;
+  width: 100%;
+  margin-top: 14px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fafbff;
+}
+
+.map-image-wrap {
+  position: relative;
+  width: 100%;
+}
+.metro-map-img {
+  display: block;
+  width: 100%;   /* 패널 폭에 꽉 차게 (직사각 이미지) */
+  height: auto;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+/* 주의·경고 역 핀 (이미지 기준 % 좌표에 절대배치) */
+.map-pin {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  z-index: 3;
+  pointer-events: none;
+}
+/* 알람 핀: 점은 항상, 이름은 호버 시에만 (많아도 안 겹치게) */
+.map-pin--hoverable {
+  pointer-events: auto;
+}
+.map-pin--hoverable:hover {
+  z-index: 6;
+}
+.map-pin--hoverable:hover .map-pin-label {
+  display: block;
+}
+/* 지점이 "빛나는" 헤일로 */
+.map-pin::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  z-index: -1;
+}
+.map-pin--warn::before {
+  background: radial-gradient(circle, rgba(232, 145, 10, 0.5), rgba(232, 145, 10, 0) 70%);
+}
+.map-pin--alert::before {
+  background: radial-gradient(circle, rgba(217, 45, 32, 0.5), rgba(217, 45, 32, 0) 70%);
+}
+.map-pin-dot {
+  display: block;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 3px solid #fff;
+  box-shadow: 0 1px 6px rgba(20, 30, 60, 0.45);
+}
+.map-pin--warn .map-pin-dot {
+  background: #e8910a;
+  animation: map-pulse-warn 1.8s ease-out infinite;
+}
+.map-pin--alert .map-pin-dot {
+  background: #d92d20;
+  animation: map-pulse-alert 1.8s ease-out infinite;
+}
+@keyframes map-pulse-warn {
+  0% { box-shadow: 0 1px 6px rgba(20, 30, 60, 0.45), 0 0 0 0 rgba(232, 145, 10, 0.55); }
+  100% { box-shadow: 0 1px 6px rgba(20, 30, 60, 0.45), 0 0 0 16px rgba(232, 145, 10, 0); }
+}
+@keyframes map-pulse-alert {
+  0% { box-shadow: 0 1px 6px rgba(20, 30, 60, 0.45), 0 0 0 0 rgba(217, 45, 32, 0.55); }
+  100% { box-shadow: 0 1px 6px rgba(20, 30, 60, 0.45), 0 0 0 16px rgba(217, 45, 32, 0); }
+}
+.map-pin-label {
+  display: none;
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.3;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(20, 30, 60, 0.22);
+}
+.map-pin--below .map-pin-label {
+  bottom: auto;
+  top: 16px;
+}
+.map-pin--warn .map-pin-label {
+  color: #b5790a;
+}
+.map-pin--alert .map-pin-label {
+  color: #d92d20;
+}
+
+/* 위치 보정 모드(#cal) */
+.cal-bar {
+  margin-top: 12px;
+  font-size: 13px;
+}
+.cal-btns {
+  display: flex;
+  gap: 8px;
+  margin: 8px 0;
+}
+.cal-btns button {
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 13px;
+}
+.cal-out {
+  width: 100%;
+  height: 160px;
+  font-family: monospace;
+  font-size: 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px;
+}
+
+.map-bg {
+  fill: #fbfcff;
+}
+
+.river {
+  fill: #dff3fb;
+  stroke: #b9dce9;
+  stroke-width: 1;
+}
+
+.river-label {
+  fill: #9bc6d6;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.district-lines path {
+  fill: none;
+  stroke: #eef1f7;
+  stroke-width: 34;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.route-layer {
+  transition: opacity 0.2s ease, filter 0.2s ease;
+}
+
+.route-layer.is-muted {
+  opacity: 0.18;
+  filter: url("#soft-blur");
+}
+
+.route-shadow,
+.route-line,
+.route-hit {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.route-shadow {
+  stroke: rgba(31, 36, 48, 0.1);
+  stroke-width: 17;
+}
+
+.route-line {
+  stroke: var(--line-color);
+  stroke-width: 8;
+}
+
+.route-hit {
+  stroke: transparent;
+  stroke-width: 28;
+  cursor: pointer;
+  pointer-events: stroke;
+}
+
+.route-hit:focus {
+  outline: none;
+}
+
+.route-hit:focus-visible + .route-line {
+  stroke-width: 11;
+}
+
+.route-label {
+  fill: var(--line-color);
+  stroke: #fff;
+  stroke-width: 4;
+  paint-order: stroke;
+  font-size: 28px;
+  font-weight: 900;
+}
+
+.station-layer {
+  pointer-events: none;
+}
+
+.map-station {
+  transition: opacity 0.18s ease, filter 0.18s ease;
+}
+
+.map-station.is-muted {
+  opacity: 0.14;
+  filter: url("#soft-blur");
+}
+
+.station-halo {
+  fill: #fff;
+  stroke: #d8dde8;
+  stroke-width: 2;
+}
+
+.station-dot.risk-alert {
+  fill: var(--alert);
+}
+
+.station-dot.risk-warn {
+  fill: var(--warn);
+}
+
+.station-dot.risk-ok {
+  fill: var(--ok);
+}
+
+.station-core {
+  fill: #fff;
+}
+
+.station-name {
+  fill: var(--ink);
+  stroke: #fff;
+  stroke-width: 4;
+  paint-order: stroke;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+/* Source: front/src/styles/index.css — old map responsive overrides */
+@media (max-width: 760px) {
+  .map-legend {
+    top: 10px;
+    right: 10px;
+  }
+
+  .station-name {
+    font-size: 14px;
+  }
+}
+
+/* Source: front/src/pages/Detail/detail.css — replaced standalone detail header */
+/* ── Top bar ─────────────────────────────────────────── */
+.dt-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 60px;
+  padding: 0 28px;
+  background: #fff;
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+.dt-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.dt-brand-logo {
+  height: 30px;
+  width: auto;
+  display: block;
+}
+.dt-brand-divider {
+  width: 1px;
+  height: 18px;
+  background: var(--line);
+}
+.dt-brand-text {
+  font-size: 15px;
+  color: var(--muted);
+}
+.dt-brand-text strong {
+  color: var(--ink);
+  font-size: 16px;
+}
+.dt-topnav {
+  display: flex;
+  gap: 4px;
+}
+.dt-topnav a {
+  padding: 7px 14px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--muted);
+  cursor: pointer;
+}
+.dt-topnav a.is-active {
+  background: var(--navy);
+  color: #fff;
+}
+
+/* Source: front/src/pages/Detail/detail.css — unused legacy coverage modifiers */
+.dt-cov--full74 {
+  background: #eaf2ff;
+  color: var(--navy);
+}
+.dt-cov--cut3 {
+  background: var(--warn-bg);
+  color: #9a6a08;
+}
+.dt-cov--billonly {
+  background: #f0f1f4;
+  color: var(--muted);
+}
+
+/* Source: front/src/pages/Detail/detail.css — unused Pending component */
+.dt-pending {
+  display: inline-block;
+  font-size: 12px;
+  color: var(--faint);
+  background: repeating-linear-gradient(-45deg, #f3f4f7, #f3f4f7 6px, #eceef2 6px, #eceef2 12px);
+  border-radius: 6px;
+  padding: 2px 8px;
+}
+
+/* Source: front/src/components/agent.css — replaced by native dialog backdrop */
+.ag-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 6vh 16px;
+  background: rgba(18, 24, 45, 0.42);
+  backdrop-filter: blur(2px);
+  overflow-y: auto;
+}

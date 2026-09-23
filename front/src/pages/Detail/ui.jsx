@@ -95,15 +95,6 @@ export function Stat({ label, value, sub, tone }) {
   );
 }
 
-export function LineBadge({ line }) {
-  return <span className={`dt-line dt-line--${line}`}>{line}호선</span>;
-}
-
-// 데이터 아직 없음 표시 (placeholder + TODO)
-export function Pending({ children = "데이터 예정" }) {
-  return <span className="dt-pending">{children}</span>;
-}
-
 export function EmptyNote({ children }) {
   return <div className="dt-empty">{children}</div>;
 }

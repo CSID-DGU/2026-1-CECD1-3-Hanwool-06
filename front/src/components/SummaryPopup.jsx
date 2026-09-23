@@ -1,217 +1,79 @@
-// 사이트 접속 시 뜨는 '당일 업무 요약' 팝업.
-// 에이전트(/api/summary)가 실데이터(이상탐지 CSV)를 보고 스스로 요약한다.
-// 각 이상 항목에서 [원인 분석](web_search) · [알림 발송](메일) 을 바로 실행.
-import { useEffect, useState } from "react";
-import { analyzeCause, getSummary, sendAlert } from "../api";
+import { useEffect, useRef, useState } from "react";
+import { analyzeCause, getSummary, sendAlert } from "../api.js";
+import { detailHref, ton } from "../pages/Detail/data.js";
 import "./agent.css";
 
-const SEV_TONE = { 경고: "alert", 주의: "warn", 정상: "ok" };
-
-// 표시용: "왕십리역5" → "왕십리역 5호선" (역명에 붙은 호선 숫자를 분리). API 호출엔 원본 역명을 그대로 쓴다.
-function formatStationName(name) {
-  const m = /^(.+역)(\d+)$/.exec(name);
-  return m ? `${m[1]} ${m[2]}호선` : name;
-}
-
-// 자유서술(헤드라인·할일·action) 안의 "약수역3" → "약수역 3호선" 으로 치환.
-function formatStationNames(text) {
-  return (text || "").replace(/([가-힣A-Za-z]+역)(\d+)/g, "$1 $2호선");
-}
-
-// source 에 출처명+URL 이 섞여 와도(예: "서울시설공단 … https://…") 실제 URL 만 뽑는다.
+const SEV_TONE = { 경고: "alert", 주의: "warn", 정상: "ok", "자료 확인": "unknown" };
+const formatStationName = (name = "") => name.replace(/^(.+역)(\d+)$/, "$1 $2호선");
+const formatStationNames = (text = "") => text.replace(/([가-힣A-Za-z]+역)(\d+)/g, "$1 $2호선");
 function extractUrl(text) {
-  const m = /https?:\/\/[^\s]+/.exec(text || "");
-  return m ? m[0] : null;
+  const match = /https?:\/\/[^\s<>]+/.exec(text || "");
+  return match ? match[0] : null;
 }
 
-export default function SummaryPopup() {
-  const [open, setOpen] = useState(true);
-  const [state, setState] = useState({ loading: true, error: null, data: null });
-
+export default function SummaryPopup({ date, onClose }) {
+  const dialog = useRef(null);
+  const [state, setState] = useState({ loading: true });
+  const [revision, setRevision] = useState(0);
+  useEffect(() => { dialog.current.showModal(); }, []);
   useEffect(() => {
-    // 정적 HTML(단일파일)에서는 백엔드 대신 주입된 요약을 사용
-    if (typeof window !== "undefined" && window.__SUMMARY__) {
-      setState({ loading: false, error: null, data: window.__SUMMARY__ });
-      return;
-    }
     let alive = true;
-    getSummary()
-      .then((data) => alive && setState({ loading: false, error: null, data }))
-      .catch((e) => alive && setState({ loading: false, error: e.message, data: null }));
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  if (!open) return null;
-  const { loading, error, data } = state;
-
-  return (
-    <div className="ag-overlay" role="dialog" aria-modal="true">
-      <div className="ag-modal">
-        <header className="ag-modal-head">
-          <div>
-            <span className="ag-eyebrow">물샘이 · 당일 업무 요약</span>
-            <h2>{loading ? "물샘이가 오늘의 이상징후를 정리하는 중…" : error ? "요약을 불러오지 못했습니다" : formatStationNames(data.headline)}</h2>
-          </div>
-          <button className="ag-x" onClick={() => setOpen(false)} aria-label="닫기">
-            ×
-          </button>
-        </header>
-
-        {loading ? (
-          <div className="ag-body ag-center">
-            <div className="ag-spinner" />
-            <p className="ag-muted">물샘이가 실데이터를 분석하고 있어요.</p>
-          </div>
-        ) : error ? (
-          <div className="ag-body">
-            <p className="ag-err">{error}</p>
-            <p className="ag-muted">
-              에이전트 서버가 켜져 있는지 확인하세요.
-              <br />
-              <code>uvicorn back.api.main:app --reload --port 8000</code>
-            </p>
-          </div>
-        ) : (
-          <SummaryBody data={data} />
-        )}
-
-        <footer className="ag-modal-foot">
-          {data?.generated_by ? <span className="ag-by">생성: {data.generated_by}</span> : <span />}
-          <button className="ag-btn ag-btn--primary" onClick={() => setOpen(false)}>
-            확인
-          </button>
-        </footer>
-      </div>
-    </div>
-  );
+    setState({ loading: true });
+    getSummary(date, revision > 0).then((data) => { if (alive) setState({ data }); })
+      .catch((error) => { if (alive) setState({ error: error.message }); });
+    return () => { alive = false; };
+  }, [date, revision]);
+  const { loading, data, error } = state;
+  return <dialog ref={dialog} className="ag-modal ag-dialog" onCancel={onClose} aria-labelledby="summary-title">
+    <header className="ag-modal-head"><div><span className="ag-eyebrow">물샘이 · 업무 요약</span>
+      <h2 id="summary-title">{loading ? "이상징후를 확인하는 중…" : error ? "요약을 불러오지 못했습니다" : formatStationNames(data.headline)}</h2></div>
+      <button className="ag-x" onClick={onClose} aria-label="닫기">×</button></header>
+    {loading ? <div className="ag-body ag-center" role="status"><div className="ag-spinner" /><p>조회 권한 내 자료를 확인하고 있습니다.</p></div>
+      : error ? <div className="ag-body"><p className="ag-err" role="alert">{error}</p><button className="ag-btn" onClick={() => setRevision((n) => n + 1)}>다시 시도</button></div>
+      : <SummaryBody data={data} onClose={onClose} />}
+    <footer className="ag-modal-foot"><span className="ag-by">수집된 자료를 바탕으로 정리한 요약</span><button className="ag-btn ag-btn--primary" onClick={onClose}>확인</button></footer>
+  </dialog>;
 }
 
-function SummaryBody({ data }) {
+function SummaryBody({ data, onClose }) {
   const cal = data.calendar || {};
-  const calTag = cal.holiday ? `공휴일${cal.holiday_name ? `(${cal.holiday_name})` : ""}` : cal.weekend ? "주말" : "평일";
-  return (
-    <div className="ag-body">
-      <div className="ag-meta">
-        <span className="ag-chip">{data.기준일} 기준</span>
-        <span className="ag-chip">{calTag}</span>
-        <span className="ag-chip ag-chip--alert">경고 {data.counts?.경고 ?? 0}</span>
-        <span className="ag-chip ag-chip--warn">주의 {data.counts?.주의 ?? 0}</span>
-      </div>
-
-      {data.items?.length ? (
-        <ul className="ag-list">
-          {data.items.map((it, i) => (
-            <AnomalyItem key={`${it.역명}-${i}`} item={it} date={data.기준일} />
-          ))}
-        </ul>
-      ) : (
-        <p className="ag-muted">새로운 이상징후가 없습니다. 정기 점검만 진행하세요.</p>
-      )}
-
-      {data.actions?.length ? (
-        <div className="ag-actions">
-          <h3>오늘 할 일</h3>
-          <ol>
-            {data.actions.map((a, i) => (
-              <li key={i}>{formatStationNames(a)}</li>
-            ))}
-          </ol>
-        </div>
-      ) : null}
-    </div>
-  );
+  const tag = cal.holiday ? `공휴일${cal.holiday_name ? ` (${cal.holiday_name})` : ""}` : cal.weekend ? "주말" : "평일";
+  return <div className="ag-body">
+    <div className="ag-meta"><span className="ag-chip">{data.기준일} 기준</span><span className="ag-chip">{tag}</span><span className="ag-chip ag-chip--alert">경고 {data.counts?.경고 ?? 0}</span><span className="ag-chip ag-chip--warn">주의 {data.counts?.주의 ?? 0}</span>{data.counts?.["자료 확인"] > 0 && <span className="ag-chip">자료 확인 {data.counts["자료 확인"]}</span>}</div>
+    {data.items?.length ? <ul className="ag-list">{data.items.map((item) => <AnomalyItem key={item.meter_id} item={item} date={data.기준일} onClose={onClose} />)}</ul>
+      : <p className="ag-muted">{data.counts?.분석 ? "확인된 분석 범위에 새로운 이상징후가 없습니다." : "이 날짜의 분석 자료가 없습니다. 수집 상태를 확인하세요."}</p>}
+    {data.actions?.length > 0 && <div className="ag-actions"><h3>확인할 사항</h3><ol>{data.actions.map((action, i) => <li key={i}>{formatStationNames(action)}</li>)}</ol></div>}
+  </div>;
 }
 
-// 이상 수치 한 줄: 과다▲/과소▼ + 수치만 bold. deviation 은 표시하지 않는다.
-function MetricLine({ item }) {
-  if (item.pct == null) {
-    // 구형 응답 호환: one_line 에서 deviation 표기만 제거해 노출.
-    return <>{(item.one_line || "").replace(/[,·]?\s*deviation\s*-?[\d.]+/i, "")}</>;
-  }
-  const up = item.dir === "과다";
-  const err = item.err_ton;
-  const errStr = `${err > 0 ? "+" : ""}${err}톤`;
-  const cls = up ? "ag-metric--up" : "ag-metric--down";
-  return (
-    <>
-      예측 대비 <span className={cls}>{up ? "▲" : "▼"}<strong>{Math.abs(item.pct)}%</strong></span> (<strong>{errStr}</strong>)
-    </>
-  );
-}
-
-// 데모용 하드코딩: 월드컵경기장역 이상 원인 분석 (실제 web_search 가 느려서 고정 응답)
-const WORLDCUP_ANALYSIS = {
-  primary_cause:
-    "6/18 당일 직접 행사·공휴일 요인은 약하며, 전일 서울월드컵경기장 보조경기장 WK리그 경기 후 역사 이용객/청소·운영상 물 사용 증가가 가장 가능한 후보입니다.",
-  confidence: "낮음",
-  reasons: [
-    "2026-06-18은 목요일 평일이며 주말·공휴일이 아니므로 달력 효과 가능성은 낮습니다.",
-    "서울시설공단 일정상 6/18 당일 서울월드컵경기장 자체 행사는 확인되지 않았습니다.",
-    "다만 2026-06-17 19:00~21:00 서울월드컵경기장 보조경기장에서 WK리그 서울시청 홈경기가 있었고, 월드컵경기장역과 인접해 전일 야간 이용객 및 익일 청소·정비 수요가 일부 이어졌을 가능성이 있습니다.",
-    "최근 이상 이력이 6/15~6/18까지 연속 과다 방향으로 나타나 단일 행사보다는 역사 내 운영상 사용 증가 또는 누수성 사용 패턴 점검이 필요합니다.",
-  ],
-  events: [
-    { title: "[서울월드컵경기장] 2026 WK리그 서울시청 홈경기", date: "2026-06-17 19:00~21:00", source: "" },
-    { title: "서울월드컵경기장 2026년 6월 일정: 6/18 당일 직접 행사 표시 없음", date: "2026-06-18", source: "" },
-  ],
-  recommendation:
-    "6/15~6/18 연속 과다 패턴이므로 전일 경기 관련 청소·개방 기록을 확인하고, 화장실·청소용수·기계실 밸브 및 누수 여부를 현장 점검하세요.",
-};
-
-function AnomalyItem({ item, date }) {
-  const tone = SEV_TONE[item.심각도] || "warn";
-  const [cause, setCause] = useState(null); // {loading, data, error}
-  const [mail, setMail] = useState(null); // {loading, msg, ok}
-
-  const runAnalyze = async () => {
+function AnomalyItem({ item, date, onClose }) {
+  const [cause, setCause] = useState(null);
+  const [mail, setMail] = useState(null);
+  const dataError = item.likely_data_error || item.심각도 === "자료 확인";
+  const tone = dataError ? "unknown" : SEV_TONE[item.심각도] || "unknown";
+  async function analyze() {
     setCause({ loading: true });
-    // 데모: 월드컵경기장역은 하드코딩 응답을 2~3초 뒤 표시
-    if (item.역명.includes("월드컵경기장")) {
-      await new Promise((r) => setTimeout(r, 2000));
-      setCause({ loading: false, data: WORLDCUP_ANALYSIS });
-      return;
-    }
-    try {
-      const res = await analyzeCause(item.역명, date);
-      setCause({ loading: false, data: res.analysis });
-    } catch (e) {
-      setCause({ loading: false, error: e.message });
-    }
-  };
-
-  const runAlert = async () => {
+    try { const result = await analyzeCause(item.meter_id, date); setCause({ data: result.analysis || result }); }
+    catch (e) { setCause({ error: e.message }); }
+  }
+  async function alert() {
+    if (!window.confirm(`${formatStationName(item.역명)}의 ${date} 이상징후를 해당 사업소에 등록된 담당자에게 이메일로 발송합니다.`)) return;
     setMail({ loading: true });
-    // 데모: 1초 뒤 발송 완료로 표시 (실제 메일 발송 생략)
-    await new Promise((r) => setTimeout(r, 1000));
-    setMail({ loading: false, ok: true, msg: "발송됨 → lucy14lee@gmail.com" });
-  };
-
-  return (
-    <li className={`ag-item ag-item--${tone}`}>
-      <div className="ag-item-main">
-        <span className={`ag-sev ag-sev--${tone}`}>{item.심각도}</span>
-        <strong className="ag-item-name">{formatStationName(item.역명)}</strong>
-        <span className="ag-item-line"><MetricLine item={item} /></span>
-      </div>
-      {item.action ? <p className="ag-item-action">→ {formatStationNames(item.action)}</p> : null}
-
-      <div className="ag-item-btns">
-        <button className="ag-btn" onClick={runAnalyze} disabled={cause?.loading}>
-          {cause?.loading ? "분석 중…" : "이상 원인 분석"}
-        </button>
-        <button className="ag-btn" onClick={runAlert} disabled={mail?.loading}>
-          {mail?.loading ? "발송 중…" : "알림 발송"}
-        </button>
-        {mail && !mail.loading ? (
-          <span className={mail.ok ? "ag-tag ag-tag--ok" : "ag-tag ag-tag--err"}>{mail.msg}</span>
-        ) : null}
-      </div>
-
-      {cause && !cause.loading ? <CauseResult cause={cause} /> : null}
-    </li>
-  );
+    try {
+      const result = await sendAlert(item.meter_id, date);
+      setMail({ ok: Boolean(result.sent), message: result.sent ? `발송 완료${result.to?.length ? ` · ${result.to.join(", ")}` : ""}` : result.reason || "발송되지 않았습니다." });
+    } catch (e) { setMail({ ok: false, message: e.message }); }
+  }
+  return <li className={`ag-item ag-item--${tone}`}>
+    <div className="ag-item-main"><span className={`ag-sev ag-sev--${tone}`}>{dataError ? "자료 확인" : item.심각도}</span>
+      <a className="ag-item-name station-link" href={detailHref(item.meter_id)} onClick={onClose}>{formatStationName(item.역명)}</a>
+      <span className="ag-item-line">{dataError ? "원자료 확인 필요 · 위험도 미산출" : <>예측 대비 <strong>{item.pct == null ? "산출 불가" : `${item.pct > 0 ? "+" : ""}${item.pct}%`}</strong> ({ton(item.err_ton ?? item.error_ton)}톤)</>}</span></div>
+    {item.action && <p className="ag-item-action">{formatStationNames(item.action)}</p>}
+    {dataError ? <p className="ag-muted">원자료를 확인한 후 분석·알림을 사용할 수 있습니다.</p> : <div className="ag-item-btns"><button className="ag-btn" disabled={cause?.loading || !item.meter_id} onClick={analyze}>{cause?.loading ? "분석 중…" : "이상 원인 분석"}</button>
+      <button className="ag-btn" disabled={mail?.loading || !item.meter_id} onClick={alert}>{mail?.loading ? "발송 중…" : "담당자에게 알림"}</button></div>}
+    {mail?.message && <p className={mail.ok ? "ag-tag ag-tag--ok" : "ag-err"} role="status">{mail.message}</p>}
+    {cause && !cause.loading && <CauseResult cause={cause} />}
+  </li>;
 }
 
 function CauseResult({ cause }) {

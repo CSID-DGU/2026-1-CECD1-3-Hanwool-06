@@ -4,8 +4,11 @@
   "scripts": {
     "dev": "npm run dev --workspace front",
     "dev:front": "npm run dev --workspace front",
-    "dev:api": "uvicorn back.api.main:app --reload --port 8000",
-    "install:all": "npm install --workspaces"
+    "dev:api": ".venv/bin/python -m uvicorn back.api.main:app --reload --host 127.0.0.1 --port 8000",
+    "install:all": "npm install --workspaces",
+    "build": "npm run build --workspace front",
+    "start": ".venv/bin/python -m uvicorn back.api.main:app --host 127.0.0.1 --port 8000",
+    "test": "npm test --workspace front"
   },
   "workspaces": [
     "front"

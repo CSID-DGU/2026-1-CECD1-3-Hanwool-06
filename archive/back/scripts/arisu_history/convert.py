@@ -8,14 +8,17 @@ crawl.py 로 수집한 XLS 파일을 역별 CSV로 변환.
 """
 
 import re
+import sys
 from collections import defaultdict
 from pathlib import Path
 
 import pandas as pd
 
 ROOT    = Path(__file__).resolve().parents[3]
-RAW_DIR = ROOT / "data" / "arisu_station_history" / "raw"
-OUT_DIR = ROOT / "data" / "arisu_station_history"
+sys.path.insert(0, str(ROOT))
+from back.pipelines.common import RUNTIME, atomic_text, collector_meters, customer_number
+RAW_DIR = RUNTIME / "raw" / "arisu_station_history"
+OUT_DIR = RUNTIME / "history"
 
 # 파일명 끝의 날짜 범위 패턴 (예: _2024-05~2025-05)
 _DATE_SUFFIX = re.compile(r"_\d{4}-\d{2}~\d{4}-\d{2}$")
@@ -65,23 +68,32 @@ def station_from(fpath: Path) -> str:
     return NAME_MAP.get(raw, raw)
 
 
-def load_xls(fpath: Path, station: str) -> pd.DataFrame | None:
+def load_xls(fpath: Path, station: str, mkey: str | None = None) -> pd.DataFrame | None:
     try:
         df = pd.read_html(fpath, encoding="utf-8")[1]
         df.insert(0, "역명", station)
+        if mkey:
+            df.insert(0, "고객번호", mkey)
         return df
     except Exception as e:
         print(f"  ❌ {fpath.name} 실패: {e}")
         return None
 
 
-def merge_by_station(files: list[Path]) -> None:
+def merge_by_station(files: list[Path], meters=None) -> None:
+    # Older exports use station names; new exports carry stable customer numbers.
+    labels = {customer_number(m["customer_number"]): m["station_name"]
+              for m in collector_meters(meters, daily=False)} if any(station_from(p).isdigit() for p in files) else {}
     station_files: dict[str, list[Path]] = defaultdict(list)
     for fpath in files:
         station_files[station_from(fpath)].append(fpath)
 
     for station, fpaths in station_files.items():
-        dfs = [df for fpath in sorted(fpaths) if (df := load_xls(fpath, station)) is not None]
+        mkey = customer_number(station) if station.isdigit() else None
+        if mkey and mkey not in labels:
+            raise ValueError("History export references an unregistered customer")
+        label = labels[mkey] if mkey else station
+        dfs = [df for fpath in sorted(fpaths) if (df := load_xls(fpath, label, mkey)) is not None]
         if not dfs:
             continue
 
@@ -90,20 +102,23 @@ def merge_by_station(files: list[Path]) -> None:
         result = result.sort_values("검침일자").reset_index(drop=True)
 
         out = OUT_DIR / f"{station}.csv"
-        result.to_csv(out, index=False, encoding="utf-8-sig")
+        if out.exists():
+            result = pd.concat([pd.read_csv(out, encoding="utf-8-sig", dtype={"고객번호": str}), result], ignore_index=True)
+            result = result.drop_duplicates().sort_values("검침일자")
+        if mkey:
+            result = result.drop_duplicates(["고객번호", "검침일자"], keep="last")
+        atomic_text(out, result.to_csv(index=False), encoding="utf-8-sig")
         print(f"  ☑️ {station}.csv ({len(result):,}행)")
 
 
 if __name__ == "__main__":
-    xls_files = sorted(RAW_DIR.glob("*.xls"))
+    xls_files = sorted((ROOT / "data" / "arisu_station_history" / "raw").glob("*.xls")) + sorted(RAW_DIR.glob("*.xls"))
     if not xls_files:
         print(f"XLS 파일이 없습니다: {RAW_DIR}")
         raise SystemExit(1)
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    for f in OUT_DIR.glob("*.csv"):
-        f.unlink()
-    print(f"출력 디렉토리 초기화 완료 ({OUT_DIR})\n")
+    print(f"기존 CSV를 보존하며 병합합니다 ({OUT_DIR})\n")
 
     merge_by_station(xls_files)
-    print(f"\n☑️ 역별 저장 완료: {OUT_DIR.relative_to(ROOT)}/")
+    print(f"\n☑️ 역별 저장 완료: {OUT_DIR}/")

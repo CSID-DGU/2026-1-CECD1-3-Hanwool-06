@@ -111,12 +111,13 @@ def _load_splits(cfg: dict) -> pd.DataFrame:
     frames = []
     for split in ("train", "valid", "test"):
         path = Path(cfg["data"][split])
-        df = pd.read_csv(path, encoding="utf-8-sig", parse_dates=["날짜"])
+        df = pd.read_csv(path, encoding="utf-8-sig", parse_dates=["날짜"], dtype={"고객번호": str})
+        df["고객번호"] = df["고객번호"].str.zfill(9)
         df["split"] = split
         frames.append(df)
     return (
         pd.concat(frames, ignore_index=True)
-        .drop_duplicates(subset=["고객번호", "역명", "날짜"], keep="last")
+        .drop_duplicates(subset=["고객번호", "날짜"], keep="last")
         .sort_values(["고객번호", "날짜"])
         .reset_index(drop=True)
     )
@@ -133,29 +134,37 @@ def _merge_calendar(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
 
 
 def _merge_bill_baseline(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
-    """격월 청구서를 (고객번호, 월)별 '하루 평균 사용량'으로 바꿔 붙인다 → bill_daily_avg.
+    """Only bills available before an observation may inform its seasonal baseline.
 
-    청구서는 두 달 합계라, 월평균(=합계/포함월수)을 다시 30.4(한 달 평균 일수)로 나눠
-    하루치로 환산한다. 같은 달 여러 해 값은 중앙값으로 묶어 평소 수준을 만든다.
+    Exact issue dates are absent in the historical export. Use the first day after
+    the final billing month as a conservative availability boundary. Incomplete
+    one-month buckets cannot identify which month was billed, so exclude them.
     """
-    bills = pd.read_csv(cfg["data"]["bills"], encoding="utf-8-sig")
-    bills = bills[
-        bills["포함월수"].notna()
-        & (bills["포함월수"] > 0)
-        & bills["격월사용량_톤"].notna()
-    ].copy()
-    bills["monthly_ton"] = bills["격월사용량_톤"] / bills["포함월수"]
-    bills["start_month"] = pd.to_datetime(bills["시작연월"].astype(str), format="%Y-%m", errors="coerce").dt.month
-    bills["end_month"] = pd.to_datetime(bills["종료연월"].astype(str), format="%Y-%m", errors="coerce").dt.month
-
-    records: list[tuple[int, int, float]] = []
+    bills = pd.read_csv(cfg["data"]["bills"], encoding="utf-8-sig", dtype={"고객번호": str})
+    records = []
     for row in bills.itertuples(index=False):
-        for month in {row.start_month, row.end_month}:
-            if pd.notna(month):
-                records.append((row.고객번호, int(month), float(row.monthly_ton) / 30.4))
-    baseline = pd.DataFrame(records, columns=["고객번호", "월", "bill_daily_avg"])
-    baseline = baseline.groupby(["고객번호", "월"], as_index=False)["bill_daily_avg"].median()
-    return df.merge(baseline, on=["고객번호", "월"], how="left")
+        if row.포함월수 != 2 or not np.isfinite(row.격월사용량_톤) or row.격월사용량_톤 < 0:
+            continue
+        start = pd.Timestamp(str(row.시작연월))
+        end = pd.Timestamp(str(row.종료연월))
+        available = end + pd.offsets.MonthBegin(1)
+        for month in {start.month, end.month}:
+            records.append((str(row.고객번호).zfill(9), month, available,
+                            float(row.격월사용량_톤) / 2 / 30.4))
+    if not records:
+        return df.assign(bill_daily_avg=np.nan)
+    baseline = pd.DataFrame(records, columns=["고객번호", "月", "available", "value"])
+    baseline = baseline.sort_values("available").drop_duplicates(["고객번호", "月", "available"], keep="last")
+    baseline["bill_daily_avg"] = baseline.groupby(["고객번호", "月"])["value"].transform(lambda s: s.expanding().median())
+    left = df.copy()
+    left["_order"] = np.arange(len(left))
+    left["月"] = left["날짜"].dt.month.astype("int64")
+    left["날짜"] = left["날짜"].astype("datetime64[ns]")
+    baseline["available"] = baseline["available"].astype("datetime64[ns]")
+    joined = pd.merge_asof(left.sort_values("날짜"),
+        baseline[["고객번호", "月", "available", "bill_daily_avg"]].sort_values("available"),
+        left_on="날짜", right_on="available", by=["고객번호", "月"], allow_exact_matches=False)
+    return joined.sort_values("_order").drop(columns=["_order", "月", "available"]).reset_index(drop=True)
 
 
 def _add_calendar_cycle_features(df: pd.DataFrame) -> pd.DataFrame:

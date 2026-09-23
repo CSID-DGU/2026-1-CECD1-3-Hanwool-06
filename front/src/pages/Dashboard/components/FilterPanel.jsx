@@ -11,6 +11,7 @@ export default function FilterPanel({
   setSelectedRisk,
   stations,
   offices,
+  billingOnly = false,
 }) {
   return (
     <section className="control-panel" aria-label="필터">
@@ -21,8 +22,8 @@ export default function FilterPanel({
           <select id="office-filter" value={selectedOffice} onChange={(event) => setSelectedOffice(event.target.value)}>
             <option value="all">전체 영업사업소</option>
             {offices.map((office) => (
-              <option value={office} key={office}>
-                {office}
+              <option value={office.id} key={office.id}>
+                {office.name}
               </option>
             ))}
           </select>
@@ -31,13 +32,14 @@ export default function FilterPanel({
         <div className="field field-wide">
           <span className="field-label">호선</span>
           <div className="line-filter" role="group" aria-label="호선 필터">
-            <button className={selectedLine === "all" ? "is-on" : ""} onClick={() => setSelectedLine("all")} type="button">
+            <button className={selectedLine === "all" ? "is-on" : ""} onClick={() => setSelectedLine("all")} aria-pressed={selectedLine === "all"} type="button">
               전체
             </button>
             {Object.entries(lineMeta).map(([line, meta]) => (
               <button
                 className={selectedLine === line ? "is-on" : ""}
                 onClick={() => setSelectedLine(line)}
+                aria-pressed={selectedLine === line}
                 style={{ "--line-color": meta.color }}
                 type="button"
                 key={line}
@@ -48,17 +50,17 @@ export default function FilterPanel({
           </div>
         </div>
 
-        <div className="field field-wide">
-          <span className="field-label">위험도</span>
+        {!billingOnly && <div className="field field-wide">
+          <span className="field-label">위험도 · 수집 상태</span>
           <div className="risk-filter" role="group" aria-label="위험도 필터">
-            {Object.entries(riskMeta).filter(([risk]) => risk !== "ok").map(([risk, meta]) => (
-              <button className={`${selectedRisk === risk ? "is-on" : ""} risk-${meta.tone}`} onClick={() => setSelectedRisk(risk)} type="button" key={risk}>
+            {Object.entries(riskMeta).filter(([risk]) => risk !== "billing_only").map(([risk, meta]) => (
+              <button className={`${selectedRisk === risk ? "is-on" : ""} risk-${meta.tone}`} onClick={() => setSelectedRisk(risk)} aria-pressed={selectedRisk === risk} type="button" key={risk}>
                 {meta.label}
                 <span>{risk === "all" ? stations.length : stations.filter((station) => station.risk === risk).length}</span>
               </button>
             ))}
           </div>
-        </div>
+        </div>}
 
         <button className="reset-btn" onClick={resetFilters} type="button">
           초기화

@@ -18,7 +18,12 @@ TARGET = "일사용량_톤"
 def load_config(path: str | Path) -> dict:
     """config.yaml 을 읽어 dict 로 반환한다."""
     with open(path, "r", encoding="utf-8") as fp:
-        return yaml.safe_load(fp)
+        config = yaml.safe_load(fp)
+    root = Path(__file__).resolve().parents[3]
+    for name, value in config["data"].items():
+        data_path = Path(value)
+        config["data"][name] = str(data_path if data_path.is_absolute() else root / data_path)
+    return config
 
 
 def set_seed(seed: int) -> None:
@@ -37,7 +42,7 @@ def ensure_dir(path: str | Path) -> Path:
 def save_json(obj: dict, path: str | Path) -> None:
     """dict 를 보기 좋은 JSON(한글 그대로)으로 저장한다."""
     with open(path, "w", encoding="utf-8") as fp:
-        json.dump(obj, fp, ensure_ascii=False, indent=2)
+        json.dump(obj, fp, ensure_ascii=False, indent=2, allow_nan=False)
 
 
 def save_csv(df: pd.DataFrame, path: str | Path) -> None:
@@ -47,13 +52,9 @@ def save_csv(df: pd.DataFrame, path: str | Path) -> None:
 
 def format_summary(summary: dict) -> str:
     """metric.summarize 결과를 한 줄 로그 문자열로 만든다."""
-    return (
-        f"rmse={summary['rmse']:.4f} "
-        f"rmse_without_data_errors={summary['rmse_without_data_errors']:.4f} "
-        f"rmse_normal_only={summary['rmse_normal_only']:.4f} "
-        f"rmse_excluding_alerts={summary['rmse_excluding_alerts']:.4f} "
-        f"경고={summary['경고']} 주의={summary['주의']}"
-    )
+    values = [f"{key}={summary[key]:.4f}" if summary[key] is not None else f"{key}=N/A"
+              for key in ['rmse', 'rmse_without_data_errors', 'rmse_normal_only', 'rmse_excluding_alerts']]
+    return ' '.join(values) + f" 경고={summary['경고']} 주의={summary['주의']}"
 
 
 # ── 예측 후처리 (bias 보정) ─────────────────────────────────────────
@@ -110,7 +111,7 @@ def _apply_online_residual_correction(meta, pred, alpha: float, clip_value: floa
     ):
         correction = state.get(cid, 0.0)
         corrected[row_idx] = max(float(base_pred) + correction, 0.0)
-        if 0 <= actual <= 500:   # 데이터오류는 보정 학습에서 제외
+        if 0 <= actual <= 500:   # 급증 관측에 온라인 보정이 빠르게 적응하지 않도록 제한
             residual = float(np.clip(actual - base_pred, -clip_value, clip_value))
             state[cid] = (1.0 - alpha) * correction + alpha * residual
     return corrected
@@ -121,7 +122,7 @@ def save_scatter_plot(anomalies: pd.DataFrame, warn_q: float, alert_q: float, pa
 
     - y=x 완벽예측선: 검은 실선
     - 잔차 |actual-pred| 의 q95/q99 밴드: 빨간 점선 (y=x ± 해당 잔차)
-    - 점 색: 심각도(정상/주의/경고). 축 가독성을 위해 데이터오류(음수/대용량)는 제외.
+    - 점 색: 심각도(정상/주의/경고). 음수·비유한 관측은 제외.
     (한글 폰트 깨짐 방지로 라벨은 영문)
     """
     import matplotlib
@@ -129,6 +130,8 @@ def save_scatter_plot(anomalies: pd.DataFrame, warn_q: float, alert_q: float, pa
     import matplotlib.pyplot as plt
 
     df = anomalies[~anomalies["likely_data_error"]]
+    if df.empty:
+        return
     actual = df["일사용량_톤"].to_numpy(dtype=float)
     pred = df["predicted_ton"].to_numpy(dtype=float)
     abs_resid = np.abs(actual - pred)

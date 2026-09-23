@@ -1,70 +1,49 @@
-// 전체현황 대시보드 데이터: public/risk.json + stations.json 을 런타임에 읽어 역 목록을 구성한다.
-// 정적 data.js 대신 사용 → daily-snapshot 에서 sync 된 최신 데이터가 그대로 반영됨.
-// (build_dashboard_map.py 의 역 빌드 로직을 JS로 옮긴 것. 좌표는 제외 — 리스트·테이블·필터용)
-
+import { buildStations } from "../Detail/data.js";
 export const lineMeta = {
-  1: { name: "1호선", color: "#0052a4" },
-  2: { name: "2호선", color: "#00a84d" },
-  3: { name: "3호선", color: "#ef7c1c" },
-  4: { name: "4호선", color: "#00a5de" },
-  5: { name: "5호선", color: "#996cac" },
-  6: { name: "6호선", color: "#cd7c2f" },
-  7: { name: "7호선", color: "#747f00" },
-  8: { name: "8호선", color: "#e6186c" },
+  1: { name: "1호선", color: "#0052a4" }, 2: { name: "2호선", color: "#00a84d" },
+  3: { name: "3호선", color: "#ef7c1c" }, 4: { name: "4호선", color: "#00a5de" },
+  5: { name: "5호선", color: "#996cac" }, 6: { name: "6호선", color: "#cd7c2f" },
+  7: { name: "7호선", color: "#747f00" }, 8: { name: "8호선", color: "#e6186c" },
+  9: { name: "9호선", color: "#8e6e2e" },
 };
-
 export const riskMeta = {
-  all: { label: "전체", tone: "all" },
-  alert: { label: "경고", tone: "alert" },
-  warn: { label: "주의", tone: "warn" },
-  ok: { label: "정상", tone: "ok" },
+  all: { label: "전체", tone: "all" }, alert: { label: "경고", tone: "alert" },
+  warn: { label: "주의", tone: "warn" }, ok: { label: "정상", tone: "ok" },
+  unknown: { label: "자료 확인", tone: "unknown" },
+  analysis_pending: { label: "분석 대기", tone: "unknown" },
+  pending: { label: "첫 수집 대기", tone: "pending" },
+  billing_only: { label: "청구 전용", tone: "billing" },
 };
-
 const SEV = { 경고: "alert", 주의: "warn", 정상: "ok" };
-
-const display = (name) => name.replace(/\d+$/, ""); // "왕십리역5" → "왕십리역"
-
-function buildStations(risk, smeta) {
-  const out = [];
-  for (const [cid, arr] of Object.entries(risk)) {
-    const meta = smeta[cid];
-    if (!meta || !arr || arr.length === 0) continue;
-    const latest = arr.reduce((a, b) => (a.date >= b.date ? a : b));
-    const pred = latest.pred || 0;
-    const resid = latest.residual || 0;
-    const d = new Date(`${latest.date}T00:00:00Z`); // UTC 고정으로 날짜 밀림 방지
-    d.setUTCDate(d.getUTCDate() + 1);
-    out.push({
-      id: cid,
-      name: display(meta.역명),
-      office: meta.영업사업소 || "",
-      lines: [String(meta.호선)],
-      risk: SEV[latest.severity] || "ok",
-      customerNo: cid,
-      usage: Math.round(latest.actual || 0),
-      delta: pred ? Math.round((resid / pred) * 1000) / 10 : 0,
-      checkedAt: `${d.toISOString().slice(0, 10)} 08:00`,
-    });
-  }
-  out.sort((a, b) =>
-    a.lines[0] !== b.lines[0] ? a.lines[0].localeCompare(b.lines[0]) : a.name.localeCompare(b.name),
-  );
-  return out;
+export function buildDashboard(data) {
+  const stations = buildStations(data.bills, data.stations, data.daily, data.risk, data.meters).flatMap((s) => s.lines.map((l) => {
+    const reference = data.status?.reference_date || data.status?.latest_risk;
+    const stale = Boolean(l.risk && reference && l.risk.기준일 < String(reference).slice(0, 10));
+    return {
+      id: l.meterId, stationId: s.id, name: s.역명, displayName: l.display_name || l.고객번호,
+      dataMode: l.dataMode, latestBillMonth: l.bills.at(-1)?.ym || "",
+      office: l.영업사업소, officeId: String(l.office_id ?? ""), lines: [String(l.line)],
+      risk: l.dataMode === "billing_only" ? "billing_only" : l.dataMode === "pending" ? "pending" : l.riskError || stale ? "unknown" : SEV[l.risk?.severity] || "analysis_pending",
+      riskDetail: l.dataMode === "billing_only" ? "청구·요금 자료 제공" : l.dataMode === "pending" ? "수집 대상 등록됨" : l.riskError ? "최근 분석 자료 확인 필요" : stale ? "이전 기준일 자료" : !l.risk ? "일일 사용량 수집됨" : "",
+      customerNo: l.고객번호, usage: l.daily?.at(-1)?.value ?? l.risk?.actual ?? null,
+      delta: l.risk?.pct ?? null,
+      dailyDate: l.daily?.at(-1)?.date || "", riskDate: l.risk?.기준일 || "", dailyEnabled: l.daily_enabled,
+    };
+  }));
+  return { stations, offices: data.offices || [] };
 }
 
-export async function loadDashboard() {
-  const base = import.meta.env.BASE_URL;
-  // 정적 HTML(단일파일)에서는 주입된 전역(window.__RISK__ 등)을 우선 사용
-  const g = typeof window !== "undefined" ? window : {};
-  try {
-    const [risk, smeta] = await Promise.all([
-      g.__RISK__ ? Promise.resolve(g.__RISK__) : fetch(`${base}risk.json`).then((r) => r.json()),
-      g.__STATIONS__ ? Promise.resolve(g.__STATIONS__) : fetch(`${base}stations.json`).then((r) => r.json()),
-    ]);
-    const stations = buildStations(risk, smeta);
-    const offices = [...new Set(stations.map((s) => s.office).filter(Boolean))].sort();
-    return { stations, offices };
-  } catch {
-    return { stations: [], offices: [] };
+export function buildMapGroups(stations, locations = {}) {
+  const groups = new Map();
+  const rank = { billing_only: -2, pending: -1, analysis_pending: 0, ok: 1, unknown: 2, warn: 3, alert: 4 };
+  for (const station of stations) {
+    const id = station.stationId || station.name;
+    const position = locations[id] || locations[station.id] || locations[station.customerNo];
+    if (!groups.has(id)) groups.set(id, { id, name: station.name, meters: [], risk: "billing_only", position: null });
+    const group = groups.get(id);
+    group.meters.push(station);
+    if (position && Number.isFinite(position.x) && Number.isFinite(position.y) && position.x >= 0 && position.x <= 100 && position.y >= 0 && position.y <= 100) group.position = position;
+    if (rank[station.risk] > rank[group.risk]) group.risk = station.risk;
   }
+  return [...groups.values()];
 }

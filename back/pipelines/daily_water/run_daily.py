@@ -1,48 +1,28 @@
-"""
-매일 1회 실행되는 파이프라인 진입점 (GitHub Actions daily.yml 에서 호출).
-
-직접 실행:
-  python back/pipelines/daily_water/run_daily.py              # 어제 날짜
-  python back/pipelines/daily_water/run_daily.py 2026-05-05   # 특정 날짜
-"""
-
+"""Collect one day or an inclusive date range, using the shared registered contracts."""
 import argparse
 import sys
-import traceback
 from datetime import date, timedelta
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+ROOT = Path(__file__).resolve().parents[3]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+from back.pipelines.common import RUNTIME, collection_lock, today
+from back.pipelines.daily_water.scraper import scrape_range
 
-from scraper import scrape
 
-
-def run(target_date: date | None = None) -> bool:
-    if target_date is None:
-        target_date = date.today() - timedelta(days=1)
-
-    print(f"{'='*50}")
-    print(f"[파이프라인 시작] 대상 날짜: {target_date}")
-    print(f"{'='*50}")
-
-    try:
-        csv_path = scrape(target_date)
-        print(f"  → {csv_path}")
-    except Exception as e:
-        print(f"  ❌ 수집 실패: {e}")
-        traceback.print_exc()
-        return False
-
-    print(f"\n{'='*50}")
-    print("[파이프라인 완료]")
-    print(f"{'='*50}")
-    return True
+def run(start=None, end=None):
+    start = start or today() - timedelta(days=1)
+    reports = scrape_range(start, end or start)
+    for report in reports:
+        print(report)
+    return not any(r["errors"] for r in reports)
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="일별 수도 사용량 파이프라인")
-    parser.add_argument("date", nargs="?", help="실행 날짜 YYYY-MM-DD (기본: 어제)")
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("start", nargs="?", type=date.fromisoformat)
+    parser.add_argument("end", nargs="?", type=date.fromisoformat)
     args = parser.parse_args()
-    target = date.fromisoformat(args.date) if args.date else None
-    success = run(target)
-    sys.exit(0 if success else 1)
+    with collection_lock(RUNTIME):
+        raise SystemExit(0 if run(args.start, args.end) else 1)
