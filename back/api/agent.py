@@ -1,7 +1,10 @@
 """Facts come from the scoped snapshot; optional AI only suggests causes."""
 import json
+import logging
 from openai import OpenAI
 from . import config, data_access
+
+logger = logging.getLogger(__name__)
 
 
 def daily_summary(date=None, office_ids=None):
@@ -64,5 +67,6 @@ def analyze_cause(meter_id, date=None, office_ids=None):
         parsed['events'] = [event for event in events if event.get('source', '').startswith('https://')]
         parsed['reasons'] = reasons
         return {**result, 'analysis': parsed, 'generated_by': config.OPENAI_MODEL}
-    except Exception:
+    except Exception as exc:
+        logger.warning('External analysis failed (%s)', type(exc).__name__)
         return {**result, 'analysis': {'error': '외부 분석 서비스 응답을 확인하지 못했습니다. API 설정을 확인하고 다시 시도하세요.'}, 'generated_by': 'none'}

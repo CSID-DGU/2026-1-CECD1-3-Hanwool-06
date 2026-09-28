@@ -230,25 +230,26 @@ def worker(stop):
                 stop.wait(2)  # Take over if the API process owning this queue exits.
         else:
             return
-        with db.connect() as c:
-            c.execute("UPDATE collection_items SET status='interrupted',message='이전 수집 중 서버가 중지되었습니다. 다시 시도하세요.',finished_at=? WHERE job_id IN (SELECT id FROM collection_jobs WHERE status='running') AND status IN ('queued','running')", (db.now(),))
-            c.execute("UPDATE collection_jobs SET status='interrupted',finished_at=? WHERE status='running'", (db.now(),))
+        first_pass = True
         while not stop.is_set():
             try:
                 with db.connect() as c:
                     c.execute('BEGIN IMMEDIATE')
+                    # The queue lock has one owner; a running job here belongs to a prior process or failed loop.
+                    state = 'interrupted' if first_pass else 'failed'
+                    message = '이전 수집 중 서버가 중지되었습니다. 다시 시도하세요.' if first_pass else '수집 처리 오류입니다. 다시 시도하세요.'
+                    c.execute("UPDATE collection_items SET status=?,message=?,finished_at=? WHERE job_id IN (SELECT id FROM collection_jobs WHERE status='running') AND status IN ('queued','running')", (state, message, db.now()))
+                    c.execute("UPDATE collection_jobs SET status=?,finished_at=? WHERE status='running'", (state, db.now()))
                     schedule_due(c)
                     row = c.execute("SELECT id FROM collection_jobs WHERE status='queued' ORDER BY id LIMIT 1").fetchone()
                     if row:
                         c.execute("UPDATE collection_jobs SET status='running',started_at=? WHERE id=?", (db.now(), row[0]))
+                first_pass = False
                 if row:
                     run_job(row[0], stop)
                     continue
             except Exception as exc:
                 logger.error('Collection worker failed (%s)', type(exc).__name__)
-                with db.connect() as c:
-                    c.execute("UPDATE collection_items SET status='failed',message='수집 처리 오류입니다. 다시 시도하세요.',finished_at=? WHERE job_id IN (SELECT id FROM collection_jobs WHERE status='running') AND status IN ('queued','running')", (db.now(),))
-                    c.execute("UPDATE collection_jobs SET status='failed',finished_at=? WHERE status='running'", (db.now(),))
             stop.wait(2)
 
 

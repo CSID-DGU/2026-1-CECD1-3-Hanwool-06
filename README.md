@@ -34,7 +34,7 @@ macOS에서 LightGBM이 `libomp.dylib`을 찾지 못하면 `brew install libomp`
 cp .env.example .env
 ```
 
-먼저 `ADMIN_EMAIL`, `ADMIN_PASSWORD`(12~128자)를 채웁니다. 사용자 DB가 비어 있을 때 첫 총괄 관리자를 생성하며, 이후 `.env` 수정으로 기존 비밀번호가 덮어써지지는 않습니다. 로그인 후 관리 화면에서 직원을 확인해 담당자 계정을 등록합니다. 공개 회원가입은 없습니다.
+먼저 `ADMIN_EMAIL`, `ADMIN_PASSWORD`(12~128자)를 채웁니다. 사용자 DB가 비어 있을 때 첫 총괄 관리자를 생성하며 첫 로그인 후 비밀번호를 변경해야 합니다. 이후 `.env` 수정으로 기존 비밀번호가 덮어써지지는 않습니다. 초기 설정이 끝나면 운영 환경의 `ADMIN_PASSWORD` 값을 제거합니다. 로그인 후 관리 화면에서 직원을 확인해 담당자 계정을 등록합니다. 공개 회원가입은 없습니다.
 
 ```sh
 # 터미널 1: API
@@ -53,6 +53,18 @@ npm run start
 ```
 
 운영에서는 HTTPS를 적용하고 `APP_ENV=production`, `APP_COOKIE_SECURE=true`, `APP_ORIGINS`, `APP_ALLOWED_HOSTS`를 실제 도메인으로 지정합니다. API 서버와 수집 명령은 같은 `APP_DATA_DIR` 및 `APP_DB_PATH`를 사용해야 합니다. 기본 저장소는 `data/runtime/`입니다. 이 디렉터리는 사용자/세션/수집 자료를 포함하므로 외부 정적 웹서버에 노출하지 않습니다. `front/dist/`만으로는 로그인 데이터 서비스를 제공할 수 없습니다.
+
+### EC2·RDS·S3 배포 상태
+
+계획한 규모는 EC2 `t3.medium`(4GiB, gp3 50GB), RDS PostgreSQL `db.t4g.small`(Single-AZ, gp3 20GB), 비공개 S3 50GB입니다. **현재 코드로는 이 구성을 그대로 배포할 수 없습니다.** `back/api/db.py`와 여러 API·수집 쿼리가 SQLite 전용이며, `APP_DB_PATH`에 PostgreSQL 주소를 넣어도 연결되지 않습니다. RDS 사용 전 스키마·트랜잭션·쿼리·백업 명령·일회성 데이터 이관을 수정하고 PostgreSQL 통합 시험을 끝내야 합니다. 그때까지 아래 SQLite 백업 명령은 현재 구현에만 해당합니다.
+
+- EC2의 전용 일반 사용자로 `npm run start:production`을 사용해 API **한 인스턴스**를 실행하고, HTTPS 역방향 프록시가 화면과 `/api`를 같은 도메인으로 전달하게 합니다. Uvicorn은 `127.0.0.1:8000`에만 바인딩합니다. 프록시는 실제 `Host`와 `X-Forwarded-Proto`를 전달하고, 외부 요청을 직접 받는 Nginx라면 `X-Forwarded-For`를 `$remote_addr`로 덮어씁니다. 실행 명령은 로컬 프록시만 신뢰합니다. 로그인 경로에 프록시의 IP별 요청·동시 연결 제한을 두고, 8000번 포트는 외부에 열지 않습니다.
+- 운영 설정은 `APP_ENV=production`, `APP_COOKIE_SECURE=true`, `APP_ORIGINS=https://water.example.com`, `APP_ALLOWED_HOSTS=water.example.com`, `APP_DATA_DIR=/var/lib/water-monitor`, `TODAY_OVERRIDE=`처럼 실제 도메인과 경로를 지정합니다. **현재 SQLite 구현에서** `APP_DB_PATH`의 기본값은 `/var/lib/water-monitor/app.sqlite3`입니다. 운영 데이터·DB 경로가 저장소 안이거나 HTTPS/쿠키/호스트 설정이 잘못되면 서버 시작을 중단합니다. 환경 파일은 저장소 밖에 0600 권한으로 두고 systemd `EnvironmentFile` 등으로 프로세스에 주입합니다. `APP_ENV=production`으로 시작하면 저장소의 개발용 `.env`는 읽지 않습니다.
+- 수집 원본·모델 결과는 먼저 EC2의 암호화된 영속 EBS에서 처리합니다. 현재 수집기는 로컬 파일 잠금과 원자적 파일 교체를 사용하므로 S3를 `APP_DATA_DIR`로 지정하거나 마운트하지 않습니다. EBS 디렉터리는 전용 사용자 소유·0700 권한으로 두고 기존 파일 권한도 확인합니다. 파일 백업은 수집·모델 갱신이 끝난 일관된 시점에 S3로 업로드합니다. 자동 S3 업로드·복구 절차는 아직 구현되지 않았습니다.
+- S3 버킷은 Block Public Access, 기본 암호화, 버전 관리와 오래된 버전의 수명 주기를 설정합니다. EC2 인스턴스 역할에 해당 백업 prefix의 최소 권한만 부여하고 장기 AWS 액세스 키를 환경 파일에 저장하지 않습니다. PostgreSQL 이관 후 DB 복구는 RDS 자동 백업·스냅샷으로 관리하고, S3에는 파일 자료를 백업합니다.
+- EC2 보안 그룹에는 80/443만 공개하고 SSH는 관리 주소로 제한하거나 Session Manager를 사용합니다. RDS는 비공개 서브넷에 두고 5432는 EC2 보안 그룹에서만 허용합니다. EC2 메타데이터는 IMDSv2 필수로 설정합니다. 수집·AI·SMTP 비밀값은 서버 환경에만 주입합니다. AI 원인 추정은 역명과 사용량 이력을 외부 서비스로 전송하므로 데이터 반출 기준을 확인합니다.
+- `t3.medium`에서는 모델 재학습과 API·수집 작업이 CPU·메모리를 공유합니다. 초기에는 모델 작업을 비혼잡 시간에 `--jobs 1`로 실행하고 실제 최대 메모리·CPU 크레딧·디스크 증가량을 확인합니다. Single-AZ RDS의 장애·복구 목표와 백업 보존 기간도 운영 전에 정합니다.
+- GitHub 저장소를 비공개로 바꾸더라도 과거 공개 이력에 있던 청구·주소 자료의 노출은 되돌릴 수 없습니다. 해당 자료가 실데이터라면 이미 복제되었을 가능성을 전제로 접근 권한과 보존 범위를 별도로 검토합니다.
 
 ## 사용 흐름
 

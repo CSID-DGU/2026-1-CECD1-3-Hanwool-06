@@ -146,6 +146,14 @@ test("API mutations use the in-memory CSRF token and cookie session expires on 4
   } finally { globalThis.fetch = originalFetch; globalThis.window = originalWindow; setCsrfToken(); }
 });
 
+test("successful API responses with invalid JSON report a routing error", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => { throw new SyntaxError("Unexpected token '<'"); } });
+    await assert.rejects(request("/health"), /서버 응답 형식이 올바르지 않습니다\. API 경로를 확인하세요/);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
 test("collection completion invalidates data once even when a queued job takes over", () => {
   const queued = { id: 1, status: "queued" };
   const running = { id: 1, status: "running" };

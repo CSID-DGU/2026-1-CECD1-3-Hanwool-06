@@ -54,6 +54,7 @@ def init_db():
         CREATE INDEX IF NOT EXISTS login_attempt_identity ON login_attempts(identity,attempted_at);
         CREATE TABLE IF NOT EXISTS audit_log(id INTEGER PRIMARY KEY,actor_id INTEGER REFERENCES users(id),
           action TEXT NOT NULL,target TEXT NOT NULL,details TEXT NOT NULL DEFAULT '{}',created_at TEXT NOT NULL);
+        CREATE INDEX IF NOT EXISTS audit_actor_action_time ON audit_log(actor_id,action,created_at);
         CREATE TABLE IF NOT EXISTS collection_jobs(
           id INTEGER PRIMARY KEY,status TEXT NOT NULL,trigger TEXT NOT NULL,actor_id INTEGER REFERENCES users(id),
           created_at TEXT NOT NULL,started_at TEXT,finished_at TEXT);

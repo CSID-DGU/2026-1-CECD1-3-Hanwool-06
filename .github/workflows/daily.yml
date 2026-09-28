@@ -26,9 +26,6 @@ jobs:
       MPLBACKEND: Agg
       APP_DATA_DIR: ${{ vars.APP_DATA_DIR }}
       APP_DB_PATH: ${{ vars.APP_DB_PATH }}
-      ARISU_USER_ID: ${{ secrets.ARISU_USER_ID }}
-      ARISU_USER_PWD: ${{ secrets.ARISU_USER_PWD }}
-      SEOUL_PSGR_KEY: ${{ secrets.SEOUL_PSGR_KEY }}
       START_DATE: ${{ inputs.start }}
       END_DATE: ${{ inputs.end }}
     steps:
@@ -63,6 +60,10 @@ jobs:
           python -m pip install -r back/api/requirements.txt -r back/pipelines/requirements.txt
       - name: Refresh registered contracts and private model snapshot
         shell: bash
+        env:
+          ARISU_USER_ID: ${{ secrets.ARISU_USER_ID }}
+          ARISU_USER_PWD: ${{ secrets.ARISU_USER_PWD }}
+          SEOUL_PSGR_KEY: ${{ secrets.SEOUL_PSGR_KEY }}
         run: |
           args=(--all)
           if [[ -n "$START_DATE" ]]; then args+=(--start "$START_DATE"); fi

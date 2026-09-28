@@ -21,6 +21,8 @@ import numpy as np
 HERE = Path(__file__).resolve().parent
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
+if str(HERE.parents[2]) not in sys.path:
+    sys.path.insert(0, str(HERE.parents[2]))
 
 if __package__:
     from . import dataset, metric, utils

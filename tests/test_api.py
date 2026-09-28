@@ -1,6 +1,7 @@
 """End-to-end authorization, registry and download checks without external credentials."""
 import io
 import json
+import sqlite3
 import tempfile
 import threading
 import unittest
@@ -16,6 +17,7 @@ from back.api import collection, config, data_access, db, main, mailer
 class ApplicationTest(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
+        self.admin_password = 'LocalTestPass!234'
         root = Path(self.temp.name)
         self.patches = [patch.object(config, 'APP_DB_PATH', root/'test.sqlite3'), patch.object(config, 'SEED_DIR', root),
                         patch.object(config, 'ADMIN_EMAIL', 'chief@example.com'), patch.object(config, 'ADMIN_PASSWORD', 'LocalTestPass!234'),
@@ -44,8 +46,9 @@ class ApplicationTest(unittest.TestCase):
             p.stop()
         self.temp.cleanup()
 
-    def login(self, client=None, email='chief@example.com', password='LocalTestPass!234'):
+    def login(self, client=None, email='chief@example.com', password=None):
         client = client or self.client
+        password = password or self.admin_password
         response = client.post('/api/auth/login', json={'email': email, 'password': password})
         self.assertEqual(response.status_code, 200, response.text)
         client.headers['X-CSRF-Token'] = response.json()['csrf_token']
@@ -53,6 +56,8 @@ class ApplicationTest(unittest.TestCase):
             self.assertEqual(client.get('/api/data').status_code, 403)
             changed = client.post('/api/auth/password', json={'current_password': password, 'new_password': password + 'New'})
             self.assertEqual(changed.status_code, 200, changed.text)
+            if email == 'chief@example.com':
+                self.admin_password = password + 'New'
         return response.json()['user']
 
     def create_manager(self, email='staff@example.com', office='동부'):
@@ -118,7 +123,7 @@ class ApplicationTest(unittest.TestCase):
         self.assertEqual(self.client.post('/api/auth/logout',headers={'Origin':'https://outsider.invalid'}).status_code,403)
         old_session = TestClient(main.app, base_url='http://localhost')
         self.login(old_session)
-        changed = self.client.post('/api/auth/password',json={'current_password':'LocalTestPass!234','new_password':'ChangedPass!234'})
+        changed = self.client.post('/api/auth/password',json={'current_password':self.admin_password,'new_password':'ChangedPass!234'})
         self.assertEqual(changed.status_code,200)
         self.assertEqual(old_session.get('/api/data').status_code,401)
         self.assertEqual(self.client.post('/api/auth/logout').status_code,200)
@@ -126,7 +131,87 @@ class ApplicationTest(unittest.TestCase):
         for _ in range(5):
             self.assertEqual(self.client.post('/api/auth/login',json={'email':'chief@example.com','password':'incorrectpass'}).status_code,401)
         self.assertEqual(self.client.post('/api/auth/login',json={'email':'chief@example.com','password':'ChangedPass!234'}).status_code,429)
+        other_ip = TestClient(main.app, base_url='http://localhost', client=('192.0.2.1', 50000))
+        self.assertEqual(other_ip.post('/api/auth/login', json={'email': 'chief@example.com', 'password': 'ChangedPass!234'}).status_code, 200)
+        other_ip.close()
         old_session.close()
+
+    def test_login_hash_does_not_hold_writer_lock_and_ip_limit_applies(self):
+        verify = main.auth.verify_password
+
+        def unlocked_verify(*args):
+            with sqlite3.connect(config.APP_DB_PATH, timeout=0) as c:
+                c.execute('BEGIN IMMEDIATE')
+            return verify(*args)
+
+        with patch.object(main.auth, 'verify_password', side_effect=unlocked_verify):
+            response = self.client.post('/api/auth/login', json={'email': 'chief@example.com', 'password': self.admin_password})
+        self.assertEqual(response.status_code, 200, response.text)
+        with patch.object(main.auth, 'verify_password', return_value=False):
+            for index in range(30):
+                response = self.client.post('/api/auth/login', json={'email': f'unknown{index}@example.com', 'password': 'wrong'})
+                self.assertEqual(response.status_code, 401)
+        self.assertEqual(self.client.post('/api/auth/login', json={'email': 'chief@example.com', 'password': self.admin_password}).status_code, 429)
+        other_ip = TestClient(main.app, base_url='http://localhost', client=('192.0.2.2', 50000))
+        self.assertEqual(other_ip.post('/api/auth/login', json={'email': 'chief@example.com', 'password': self.admin_password}).status_code, 200)
+        other_ip.close()
+        for _ in range(4):
+            self.assertTrue(main.LOGIN_HASH_SLOTS.acquire(blocking=False))
+        try:
+            self.assertEqual(self.client.post('/api/auth/login', json={'email': 'chief@example.com', 'password': self.admin_password}).status_code, 429)
+        finally:
+            for _ in range(4):
+                main.LOGIN_HASH_SLOTS.release()
+
+    def test_ai_analysis_limits_paid_calls_per_account(self):
+        self.login()
+        with patch.object(config, 'OPENAI_API_KEY', 'test-key'), patch.object(main.agent, 'analyze_cause', return_value={'ok': True}) as analyze:
+            for _ in range(20):
+                response = self.client.post('/api/analyze', json={'meter_id': '000000001', 'date': '2026-08-31'})
+                self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(self.client.post('/api/analyze', json={'meter_id': '000000001', 'date': '2026-08-31'}).status_code, 429)
+            self.assertEqual(analyze.call_count, 20)
+
+    def test_production_config_requires_https_and_secure_cookie(self):
+        with patch.object(config, 'APP_ENV', 'production'), patch.object(config, 'COOKIE_SECURE', False):
+            with self.assertRaisesRegex(RuntimeError, 'APP_COOKIE_SECURE'):
+                config.validate_deployment()
+        with patch.object(config, 'APP_ENV', 'production'), patch.object(config, 'COOKIE_SECURE', True), \
+             patch.object(config, 'FRONT_ORIGINS', ['https://water.example.com']), \
+             patch.object(config, 'ALLOWED_HOSTS', ['water.example.com']), \
+             patch.object(config, 'DATA_DIR', Path(self.temp.name)):
+            config.validate_deployment()
+            with patch.object(config, 'DATA_DIR', config.ROOT / 'data/runtime'):
+                with self.assertRaisesRegex(RuntimeError, '저장소 밖'):
+                    config.validate_deployment()
+            with patch.object(config, 'APP_DB_PATH', config.ROOT / 'data/runtime/app.sqlite3'):
+                with self.assertRaisesRegex(RuntimeError, '저장소 밖'):
+                    config.validate_deployment()
+
+    def test_collection_worker_recovers_after_status_write_failure(self):
+        with db.connect() as c:
+            c.execute('BEGIN IMMEDIATE')
+            job_id = collection.enqueue(c, ['000000001'], 'manual')
+        original_connect = db.connect
+        calls = 0
+
+        def flaky_connect():
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise sqlite3.OperationalError('temporary database failure')
+            return original_connect()
+
+        stop = Mock()
+        stop.is_set.side_effect = [False, False, False, False, True]
+        with patch.object(config, 'DATA_DIR', Path(self.temp.name) / 'runtime'), \
+             patch.object(collection, 'schedule_due'), \
+             patch.object(collection, 'run_job', side_effect=RuntimeError('worker error')) as run_job, \
+             patch.object(collection.db, 'connect', side_effect=flaky_connect):
+            collection.worker(stop)
+        run_job.assert_called_once()
+        with db.connect() as c:
+            self.assertEqual(c.execute('SELECT status FROM collection_jobs WHERE id=?', (job_id,)).fetchone()[0], 'failed')
 
     def test_other_provider_cannot_alias_foreign_arisu_customer(self):
         self.login()

@@ -230,7 +230,7 @@ class IncrementalTest(unittest.TestCase):
         session.get.return_value = Mock(url='https://i121.seoul.go.kr/cyber/front/mypage/JR_remoteMeterHistory.do',
                                        status_code=200, text=json.dumps(payload), json=Mock(return_value=payload))
         with self.assertRaises(ValueError):
-            water.fetch_month(session, self.meter, '2026-06', verify_customer=True)
+            water.fetch_month(session, self.meter, '2026-06')
 
     def test_readding_same_customer_cannot_create_second_contract(self):
         with self.assertRaises(sqlite3.IntegrityError):

@@ -133,7 +133,7 @@ def _collect(meter, session, notify):
         notify(f"일일 사용량 {month} 누락 자료를 조회하고 있습니다.")
         try:
             issues = []
-            rows = fetch_month(session, meter, month, verify_customer=True, issues=issues)
+            rows = fetch_month(session, meter, month, issues=issues)
             for row in rows:
                 observed = date.fromisoformat(row["사용일"])
                 value = float(str(row["일사용량(톤)"]).replace(",", ""))

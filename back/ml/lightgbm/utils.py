@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import random
 from pathlib import Path
 
@@ -10,6 +9,7 @@ import numpy as np
 import pandas as pd
 import yaml
 from tqdm.auto import tqdm
+from back.pipelines.common import atomic_text, write_json
 
 # 예측 타겟 컬럼명 (후처리에서 실측값 참조용)
 TARGET = "일사용량_톤"
@@ -41,13 +41,12 @@ def ensure_dir(path: str | Path) -> Path:
 
 def save_json(obj: dict, path: str | Path) -> None:
     """dict 를 보기 좋은 JSON(한글 그대로)으로 저장한다."""
-    with open(path, "w", encoding="utf-8") as fp:
-        json.dump(obj, fp, ensure_ascii=False, indent=2, allow_nan=False)
+    write_json(Path(path), obj)
 
 
 def save_csv(df: pd.DataFrame, path: str | Path) -> None:
     """DataFrame 을 UTF-8-BOM CSV(엑셀 호환)로 저장한다."""
-    df.to_csv(path, index=False, encoding="utf-8-sig")
+    atomic_text(Path(path), df.to_csv(index=False), encoding="utf-8-sig")
 
 
 def format_summary(summary: dict) -> str:

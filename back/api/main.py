@@ -3,6 +3,7 @@ import json
 import re
 import secrets
 import sqlite3
+import threading
 import time
 from contextlib import asynccontextmanager
 from datetime import date as Date, datetime, timezone
@@ -20,6 +21,7 @@ from . import agent, auth, catalog, collection, config, data_access, db, documen
 
 @asynccontextmanager
 async def lifespan(app):
+    config.validate_deployment()
     db.init_db()
     with db.connect() as c:
         c.execute('BEGIN IMMEDIATE')
@@ -71,6 +73,8 @@ class Login(StrictModel):
 
 
 DUMMY_HASH = auth.hash_password(secrets.token_urlsafe(32))
+# ponytail: Four concurrent scrypt checks bound memory on one EC2 worker; use proxy rate limits for heavier traffic.
+LOGIN_HASH_SLOTS = threading.BoundedSemaphore(4)
 
 
 @app.post('/api/auth/login')
@@ -78,26 +82,43 @@ def login(body: Login, request: Request, response: Response):
     auth.check_origin(request)
     email = body.email.strip().lower()
     host = request.client.host if request.client else 'unknown'
-    identity = auth.token_hash(email + ':' + host)
-    ip_identity = auth.token_hash(host)
+    identity = auth.token_hash('email-ip:' + email + ':' + host)
+    ip_identity = auth.token_hash('ip:' + host)
     now = time.time()
+    # Limit the source, not a whole account; the trusted proxy must pass the real client IP.
+    with db.connect() as c:
+        counts = {r['identity']: r['n'] for r in c.execute(
+            'SELECT identity,count(*) AS n FROM login_attempts WHERE identity IN (?,?) AND attempted_at>=? GROUP BY identity',
+            (identity, ip_identity, now-900))}
+        blocked = counts.get(identity, 0) >= 5 or counts.get(ip_identity, 0) >= 30
+        row = c.execute('SELECT * FROM users WHERE email=?', (email,)).fetchone()
+    if blocked:
+        raise HTTPException(429, '로그인 시도가 너무 많습니다. 15분 후 다시 시도하세요.')
+    if not LOGIN_HASH_SLOTS.acquire(blocking=False):
+        raise HTTPException(429, '로그인 요청이 많습니다. 잠시 후 다시 시도하세요.')
+    try:
+        valid = auth.verify_password(body.password, row['password_hash'] if row else DUMMY_HASH)
+    finally:
+        LOGIN_HASH_SLOTS.release()
     with db.connect() as c:
         c.execute('BEGIN IMMEDIATE')
         c.execute('DELETE FROM login_attempts WHERE attempted_at<?', (now-900,))
-        counts = {r['identity']: r['n'] for r in c.execute('SELECT identity,count(*) AS n FROM login_attempts WHERE identity IN (?,?) GROUP BY identity', (identity, ip_identity))}
+        counts = {r['identity']: r['n'] for r in c.execute(
+            'SELECT identity,count(*) AS n FROM login_attempts WHERE identity IN (?,?) GROUP BY identity',
+            (identity, ip_identity))}
         if counts.get(identity, 0) >= 5 or counts.get(ip_identity, 0) >= 30:
             raise HTTPException(429, '로그인 시도가 너무 많습니다. 15분 후 다시 시도하세요.')
-        row = c.execute('SELECT * FROM users WHERE email=?', (email,)).fetchone()
-        valid = auth.verify_password(body.password, row['password_hash'] if row else DUMMY_HASH)
-        if not valid or not row or not row['active']:
-            c.executemany('INSERT INTO login_attempts(attempted_at,identity) VALUES(?,?)', [(now, identity), (now, ip_identity)])
+        current = c.execute('SELECT * FROM users WHERE email=?', (email,)).fetchone()
+        if not valid or not current or not current['active'] or not row or current['password_hash'] != row['password_hash']:
+            c.executemany('INSERT INTO login_attempts(attempted_at,identity) VALUES(?,?)',
+                          [(now, identity), (now, ip_identity)])
             user = None
         else:
             c.execute('DELETE FROM login_attempts WHERE identity=?', (identity,))
             c.execute('DELETE FROM sessions WHERE expires_at<?', (now,))
             token, csrf = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
-            c.execute('INSERT INTO sessions VALUES(?,?,?,?)', (auth.token_hash(token), row['id'], csrf, now + config.SESSION_HOURS*3600))
-            user = auth.public_user(c, row)
+            c.execute('INSERT INTO sessions VALUES(?,?,?,?)', (auth.token_hash(token), current['id'], csrf, now + config.SESSION_HOURS*3600))
+            user = auth.public_user(c, current)
             db.audit(c, user['id'], 'login')
     if user is None:
         raise HTTPException(401, '이메일 또는 비밀번호를 확인하세요.')
@@ -411,7 +432,7 @@ def anomalies(date: str | None = None, include_normal: bool = False, user=Depend
 
 
 @app.get('/api/summary')
-def summary(date: str | None = None, refresh: bool = False, user=Depends(auth.current_user)):
+def summary(date: str | None = None, user=Depends(auth.current_user)):
     scope = auth.office_scope(user)
     return agent.daily_summary(checked_date(date or data_access.reference_date(scope)), scope)
 
@@ -436,6 +457,14 @@ def analysis_input(body, user):
 @app.post('/api/analyze')
 def analyze(body: Analyze, user=Depends(auth.current_user)):
     _, date, _ = analysis_input(body, user)
+    if config.openai_ready():
+        cutoff = datetime.fromtimestamp(time.time() - 3600, timezone.utc).isoformat(timespec='seconds')
+        with db.connect() as c:
+            c.execute('BEGIN IMMEDIATE')
+            recent = c.execute("SELECT count(*) FROM audit_log WHERE actor_id=? AND action='analyze_attempt' AND created_at>=?", (user['id'], cutoff)).fetchone()[0]
+            if recent >= 20:
+                raise HTTPException(429, '원인 분석은 계정당 한 시간에 20회까지 요청할 수 있습니다.')
+            db.audit(c, user['id'], 'analyze_attempt', body.meter_id + ':' + date)
     return agent.analyze_cause(body.meter_id, date, auth.office_scope(user))
 
 

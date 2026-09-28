@@ -19,7 +19,7 @@ export default function SummaryPopup({ date, onClose }) {
   useEffect(() => {
     let alive = true;
     setState({ loading: true });
-    getSummary(date, revision > 0).then((data) => { if (alive) setState({ data }); })
+    getSummary(date).then((data) => { if (alive) setState({ data }); })
       .catch((error) => { if (alive) setState({ error: error.message }); });
     return () => { alive = false; };
   }, [date, revision]);

@@ -44,8 +44,8 @@ def bootstrap_admin():
     with db.connect() as c:
         c.execute('BEGIN IMMEDIATE')
         if not c.execute('SELECT 1 FROM users LIMIT 1').fetchone():
-            c.execute('INSERT INTO users(email,name,password_hash,role,created_at) VALUES(?,?,?,?,?)',
-                      (config.ADMIN_EMAIL, config.ADMIN_NAME, hash_password(config.ADMIN_PASSWORD), 'superadmin', db.now()))
+            c.execute('INSERT INTO users(email,name,password_hash,role,must_change_password,created_at) VALUES(?,?,?,?,?,?)',
+                      (config.ADMIN_EMAIL, config.ADMIN_NAME, hash_password(config.ADMIN_PASSWORD), 'superadmin', 1, db.now()))
 
 
 def check_origin(request):

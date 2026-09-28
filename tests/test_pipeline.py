@@ -17,6 +17,7 @@ from back.pipelines.daily_ridership import scraper as riders
 from back.scripts.billing_etl import crawl_bills as bills
 from back.scripts.billing_etl.i121_crawler import auth
 from back.ml.lightgbm import metric, dataset
+from back.ml.lightgbm.utils import save_csv, save_json
 from back.pipelines.refresh import build_dataset, publish_snapshot
 from back.pipelines import refresh
 
@@ -55,6 +56,17 @@ class PipelineTest(unittest.TestCase):
     def rows(self, path):
         with path.open(encoding='utf-8-sig', newline='') as fp:
             return list(csv.DictReader(fp))
+
+    def test_model_outputs_replace_existing_files_privately(self):
+        csv_path, json_path = self.path / 'model.csv', self.path / 'metrics.json'
+        for path in (csv_path, json_path):
+            path.write_text('old')
+            path.chmod(0o644)
+        save_csv(pd.DataFrame([{'고객번호': '000000001'}]), csv_path)
+        save_json({'결과': '정상'}, json_path)
+        self.assertEqual(self.rows(csv_path), [{'고객번호': '000000001'}])
+        self.assertEqual(json.loads(json_path.read_text()), {'결과': '정상'})
+        self.assertTrue(all(path.stat().st_mode & 0o077 == 0 for path in (csv_path, json_path)))
 
     def test_water_month_reuse_upsert_partial_and_login_error(self):
         session = Mock()

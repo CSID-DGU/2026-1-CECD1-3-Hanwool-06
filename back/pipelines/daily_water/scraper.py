@@ -115,7 +115,7 @@ def _reading_rows(payload, meter, ym, *, issues=None):
     return rows
 
 
-def fetch_month(session, meter, ym, *, verify_customer=False, issues=None):
+def fetch_month(session, meter, ym, *, issues=None):
     expected = customer_number(meter["customer_number"])
     ensure_customer_access(session, expected)
     date.fromisoformat(ym + "-01")
