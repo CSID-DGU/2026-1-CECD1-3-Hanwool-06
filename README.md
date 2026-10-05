@@ -26,6 +26,8 @@ python -m pip install -r requirements-dev.txt
 npm install
 ```
 
+conda를 쓴다면 venv 대신 `conda env create -f environment.yml && conda activate hanul`(기존 `hanul` 환경은 `conda activate hanul && python -m pip install -r requirements-dev.txt`) 후 `npm install`합니다. `npm run dev:api`·`start`는 현재 활성화된 환경의 `python`을 사용하므로 실행 전 환경을 활성화하세요. 아래 `source .venv/bin/activate`도 `conda activate hanul`로 바꿔 실행합니다.
+
 macOS에서 LightGBM이 `libomp.dylib`을 찾지 못하면 `brew install libomp`, Ubuntu에서는 `sudo apt-get install libgomp1` 후 다시 실행합니다. 모델 학습 없이 API와 화면만 시험한다면 `back/api/requirements.txt`만 설치해도 됩니다.
 
 `.env`가 없을 때만 `.env.example`을 복사합니다. 기존 파일의 값은 보존하고 새 항목만 추가하세요.
@@ -43,7 +45,7 @@ npm run dev:api
 npm run dev
 ```
 
-`http://127.0.0.1:5173`에서 로그인합니다. 프론트 개발 서버는 `/api`를 8000번 API로 전달합니다. OpenAI/SMTP/수집 키가 없어도 기존 자료와 로그인·계량기 관리·통계·PDF·Excel을 시험할 수 있습니다.
+`http://127.0.0.1:5173`에서 로그인합니다. 프론트 개발 서버는 `/api`를 8000번 API로 전달합니다. 화면은 1분마다 자료를 다시 확인하지만, 바뀐 것이 없으면 서버가 본문 없이 응답하므로 전체 자료를 다시 받지 않습니다. OpenAI/SMTP/수집 키가 없어도 기존 자료와 로그인·계량기 관리·통계·PDF·Excel을 시험할 수 있습니다.
 
 ```sh
 # 빌드 후 API 하나로 화면과 데이터를 서비스
@@ -62,6 +64,7 @@ npm run start
 - 운영 설정은 `APP_ENV=production`, `APP_COOKIE_SECURE=true`, `APP_ORIGINS=https://water.example.com`, `APP_ALLOWED_HOSTS=water.example.com`, `APP_DATA_DIR=/var/lib/water-monitor`, `TODAY_OVERRIDE=`처럼 실제 도메인과 경로를 지정합니다. **현재 SQLite 구현에서** `APP_DB_PATH`의 기본값은 `/var/lib/water-monitor/app.sqlite3`입니다. 운영 데이터·DB 경로가 저장소 안이거나 HTTPS/쿠키/호스트 설정이 잘못되면 서버 시작을 중단합니다. 환경 파일은 저장소 밖에 0600 권한으로 두고 systemd `EnvironmentFile` 등으로 프로세스에 주입합니다. `APP_ENV=production`으로 시작하면 저장소의 개발용 `.env`는 읽지 않습니다.
 - 수집 원본·모델 결과는 먼저 EC2의 암호화된 영속 EBS에서 처리합니다. 현재 수집기는 로컬 파일 잠금과 원자적 파일 교체를 사용하므로 S3를 `APP_DATA_DIR`로 지정하거나 마운트하지 않습니다. EBS 디렉터리는 전용 사용자 소유·0700 권한으로 두고 기존 파일 권한도 확인합니다. 파일 백업은 수집·모델 갱신이 끝난 일관된 시점에 S3로 업로드합니다. 자동 S3 업로드·복구 절차는 아직 구현되지 않았습니다.
 - S3 버킷은 Block Public Access, 기본 암호화, 버전 관리와 오래된 버전의 수명 주기를 설정합니다. EC2 인스턴스 역할에 해당 백업 prefix의 최소 권한만 부여하고 장기 AWS 액세스 키를 환경 파일에 저장하지 않습니다. PostgreSQL 이관 후 DB 복구는 RDS 자동 백업·스냅샷으로 관리하고, S3에는 파일 자료를 백업합니다.
+- API는 1MB를 넘거나 길이를 밝히지 않은 요청 본문을 읽지 않고 거부하며, 화면 응답에는 같은 출처의 자원만 허용하는 CSP를 붙입니다. 프록시에서도 본문 크기를 제한하세요.
 - EC2 보안 그룹에는 80/443만 공개하고 SSH는 관리 주소로 제한하거나 Session Manager를 사용합니다. RDS는 비공개 서브넷에 두고 5432는 EC2 보안 그룹에서만 허용합니다. EC2 메타데이터는 IMDSv2 필수로 설정합니다. 수집·AI·SMTP 비밀값은 서버 환경에만 주입합니다. AI 원인 추정은 역명과 사용량 이력을 외부 서비스로 전송하므로 데이터 반출 기준을 확인합니다.
 - `t3.medium`에서는 모델 재학습과 API·수집 작업이 CPU·메모리를 공유합니다. 초기에는 모델 작업을 비혼잡 시간에 `--jobs 1`로 실행하고 실제 최대 메모리·CPU 크레딧·디스크 증가량을 확인합니다. Single-AZ RDS의 장애·복구 목표와 백업 보존 기간도 운영 전에 정합니다.
 - GitHub 저장소를 비공개로 바꾸더라도 과거 공개 이력에 있던 청구·주소 자료의 노출은 되돌릴 수 없습니다. 해당 자료가 실데이터라면 이미 복제되었을 가능성을 전제로 접근 권한과 보존 범위를 별도로 검토합니다.
@@ -77,7 +80,7 @@ npm run start
 - **청구**: 월과 정기분/수시분을 구분합니다. PDF 열람·인쇄·다운로드와 Excel 내보내기는 API에서 권한을 다시 확인합니다. PDF는 수집된 값으로 생성한 **수도요금 조회내역**이며 아리수 원본 고지서 PDF가 아닙니다. 원본 출력 경로는 실제 계정으로 확인 후 별도로 연동해야 합니다.
 - **통계**: 일 사용량은 관측일, 요금은 청구월 기준으로 집계합니다. 누락은 0과 구분하며 청구 주기를 임의로 월 단위로 나누지 않습니다.
 - **이상 요약**: 화면과 API가 같은 분석 결과를 사용합니다. 다른 날짜의 결과로 대체하지 않습니다. OpenAI 원인 추정은 실제 사실과 구분하며, 실패하면 그 상태를 표시합니다.
-- **메일**: 알림 버튼을 누를 때만 발송합니다. 수신자는 해당 사업소의 활성 담당자로 서버가 결정합니다. SMTP 미설정/실패는 발송 성공으로 표시하지 않습니다.
+- **메일**: 알림 버튼을 누를 때만 발송합니다. 수신자는 해당 사업소의 활성 담당자로 서버가 결정합니다. 같은 항목은 1분에 한 번, 계정당 한 시간에 30회까지 보낼 수 있습니다. SMTP 미설정/실패는 발송 성공으로 표시하지 않습니다.
 
 초기 자료는 `data/app_seed/`에서 비공개 DB로 한 번 가져옵니다. 기존 청구 JSON, 제공된 상세 CSV의 합집합을 보존하고 중복 기준은 계량기+청구월+청구구분+고지번호입니다. 별도 고지번호가 없는 기존 청구서는 기존 ID를 유지합니다. 서버 재시작 시 관리자가 수정한 등록정보를 덮어쓰지 않습니다. 원본 자료/발표자료는 변경하지 않습니다. `meter_collection.csv`는 제공된 3차검토(260518) Excel의 D열 고객번호·F열 고지서상 성명·J열 유무(O)를 옮긴 등록 368개의 초기 수집 설정입니다. 일일+청구 81개, 청구 전용 287개이며 최초 적용 이후 관리자 변경을 보존합니다.
 

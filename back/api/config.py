@@ -29,7 +29,6 @@ ALERT_FROM = os.getenv('ALERT_FROM', '') or SMTP_USER
 TODAY_OVERRIDE = os.getenv('TODAY_OVERRIDE', '').strip()
 COLLECTION_WORKER_ENABLED = os.getenv('COLLECTION_WORKER_ENABLED', 'true').lower() == 'true'
 DATE_INDEX = ROOT / 'data/processed/date_index.csv'
-BILLS_CLEAN = ROOT / 'data/billing/bills_clean.csv'
 
 def configured(value):
     return bool(value and not value.lower().startswith(('your_', 'sk-...')))

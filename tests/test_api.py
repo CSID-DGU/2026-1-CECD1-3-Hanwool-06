@@ -81,6 +81,11 @@ class ApplicationTest(unittest.TestCase):
         payload = manager.get('/api/data').json()
         self.assertEqual(set(payload['stations']), {'000000001'})
         self.assertEqual(set(payload['risk']), {'000000001'})
+        # Unchanged data is not sent again; another scope never matches this fingerprint.
+        self.assertEqual(manager.get('/api/data', params={'version': payload['version']}).status_code, 204)
+        self.assertEqual(self.client.get('/api/data', params={'version': payload['version']}).status_code, 200)
+        missing, foreign = (manager.get(f'/api/bills/{bill}/pdf') for bill in ('unknown', '000000002:2026-08:정기분'))
+        self.assertEqual((missing.status_code, missing.json()), (404, foreign.json()))
         self.assertEqual(len(manager.get('/api/summary').json()['items']), 1)
         for path in ('/api/bills/000000002:2026-08:정기분/pdf', '/api/export.xlsx?meter_id=000000002'):
             self.assertEqual(manager.get(path).status_code, 404)
@@ -91,7 +96,9 @@ class ApplicationTest(unittest.TestCase):
         self.assertEqual(manager.patch('/api/meters/000000001',json={'office_id':'서부'}).status_code, 403)
         saved = manager.post('/api/meters',json={'provider':'arisu','customer_number':'000000003','station_name':'신규역','office_id':'동부','display_name':'신규역 직원용','line':'2'})
         self.assertEqual(saved.status_code, 201, saved.text)
-        self.assertEqual(manager.get('/api/data').json()['bills']['000000003']['bills'], [])
+        changed = manager.get('/api/data', params={'version': payload['version']})
+        self.assertEqual(changed.status_code, 200)
+        self.assertEqual(changed.json()['bills']['000000003']['bills'], [])
         self.assertEqual(manager.post('/api/meters',json={'customer_number':'000000003','station_name':'신규역','office_id':'동부','display_name':'중복'}).status_code, 409)
         self.assertEqual(manager.patch('/api/meters/000000003',json={'customer_number':'000000004'}).status_code, 422)
         pdf = manager.get('/api/bills/000000001:2026-08:정기분/pdf?download=true')
@@ -111,6 +118,13 @@ class ApplicationTest(unittest.TestCase):
             self.assertEqual(set(send.call_args.args[2].split(',')),{'staff@example.com','staff2@example.com'})
             self.assertEqual(manager.post('/api/alert',json={'meter_id':'000000001','date':'2026-08-31'}).status_code,429)
             self.assertEqual(manager.post('/api/alert',json={'meter_id':'000000001','to':'outside@example.com'}).status_code,422)
+            with db.connect() as c:
+                for index in range(30):
+                    db.audit(c, root['id'], 'alert_attempt', f'earlier:{index}')
+            capped = self.client.post('/api/alert', json={'meter_id': '000000002', 'date': '2026-08-31'})
+            self.assertEqual(capped.status_code, 429)
+            self.assertIn('한 시간', capped.json()['detail'])
+            self.assertEqual(send.call_count, 1)
         self.client.patch(f"/api/users/{staff['id']}",json={'active':False})
         self.assertEqual(manager.get('/api/data').status_code,401)
         manager.close()
@@ -119,6 +133,7 @@ class ApplicationTest(unittest.TestCase):
         self.login()
         csrf = self.client.headers.pop('X-CSRF-Token')
         self.assertEqual(self.client.post('/api/auth/logout').status_code,403)
+        self.assertEqual(self.client.post('/api/auth/logout', headers={'X-CSRF-Token': b'\xe9'}).status_code, 403)
         self.client.headers['X-CSRF-Token'] = csrf
         self.assertEqual(self.client.post('/api/auth/logout',headers={'Origin':'https://outsider.invalid'}).status_code,403)
         old_session = TestClient(main.app, base_url='http://localhost')
@@ -135,6 +150,17 @@ class ApplicationTest(unittest.TestCase):
         self.assertEqual(other_ip.post('/api/auth/login', json={'email': 'chief@example.com', 'password': 'ChangedPass!234'}).status_code, 200)
         other_ip.close()
         old_session.close()
+
+    def test_page_policy_and_request_body_limit(self):
+        self.assertIn("default-src 'self'", self.client.get('/').headers['content-security-policy'])
+        health = self.client.get('/api/health')
+        self.assertNotIn('content-security-policy', health.headers)
+        self.assertEqual(health.headers['cache-control'], 'no-store')
+        oversized = b'{"email":"' + b'a' * main.MAX_BODY_BYTES + b'","password":"x"}'
+        for body in (oversized, iter([b'{"email":"a@example.com","password":"x"}'])):
+            response = self.client.post('/api/auth/login', content=body, headers={'Content-Type': 'application/json'})
+            self.assertEqual(response.status_code, 413)
+        self.assertEqual(self.client.post('/api/auth/login', json={'email': 'a@example.com', 'password': 'x'}).status_code, 401)
 
     def test_login_hash_does_not_hold_writer_lock_and_ip_limit_applies(self):
         verify = main.auth.verify_password
@@ -345,7 +371,7 @@ class ApplicationTest(unittest.TestCase):
         self.assertIn('HTTP 404', state['latest']['message'])
         self.assertNotIn('확인 완료', state['latest']['message'])
         self.assertNotIn('secret', json.dumps(state))
-        self.assertTrue(all('공통 연결 단계' in item['message'] for item in state['latest']['items']))
+        self.assertTrue(all('연결 단계에서 중단' in item['message'] for item in state['latest']['items']))
         self.assertEqual([m['last_success_at'] for m in state['meters']], [m['last_success_at'] for m in before])
         with db.connect() as c:
             self.assertEqual(c.execute('SELECT count(*) FROM bills').fetchone()[0], 2)
@@ -435,7 +461,6 @@ class ApplicationTest(unittest.TestCase):
         risk['000000002'][0].update(actual=3186, residual=3176, z=8, err=False)
         summary = self.client.get('/api/summary').json()
         self.assertEqual(summary['counts'], {'경고': 1, '주의': 0, '자료 확인': 1, '총': 2, '분석': 1})
-        self.assertIn('자료 확인 1건', summary['headline'])
         invalid = next(item for item in summary['items'] if item['meter_id'] == '000000001')
         self.assertEqual(invalid['심각도'], '자료 확인')
         self.assertTrue(invalid['likely_data_error'])
@@ -452,7 +477,6 @@ class ApplicationTest(unittest.TestCase):
         only_errors = self.client.get('/api/summary').json()
         self.assertEqual(only_errors['counts']['분석'], 0)
         self.assertEqual(only_errors['counts']['자료 확인'], 2)
-        self.assertEqual(only_errors['actions'], ['자료 확인 항목은 원자료를 확인한 뒤 다시 분석하세요.'])
 
     def test_inactive_meter_history_does_not_move_dashboard_reference_dates(self):
         self.login()

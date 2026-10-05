@@ -42,7 +42,7 @@ def enqueue(c, meter_ids, trigger, actor_id=None):
     placeholders = ','.join('?' for _ in meter_ids)
     busy = c.execute(f"SELECT 1 FROM collection_items WHERE meter_id IN ({placeholders}) AND status IN ('queued','running') LIMIT 1", meter_ids).fetchone()
     if busy:
-        raise HTTPException(409, '선택한 계량기는 이미 수집 중이거나 대기 중입니다. 진행 상황을 확인하세요.')
+        raise HTTPException(409, '이미 수집 중이거나 수집을 기다리는 계량기입니다.')
     job_id = c.execute("INSERT INTO collection_jobs(status,trigger,actor_id,created_at) VALUES('queued',?,?,?)",
                        (trigger, actor_id, db.now())).lastrowid
     c.executemany('INSERT INTO collection_items(job_id,meter_id) VALUES(?,?)', [(job_id, m) for m in meter_ids])
@@ -67,7 +67,7 @@ def job_view(c, job, allowed):
         status = 'interrupted'
     counts = [('성공', ('success',)), ('자료 없음', ('empty',)), ('조회 권한 필요', ('access_required',)), ('일부 실패', ('partial',)),
               ('실패', ('failed', 'configuration_required')), ('제외', ('skipped',)), ('중단', ('interrupted',))]
-    summary = ' · '.join(f'{label} {count}개' for label, values in counts
+    summary = ', '.join(f'{label} {count}개' for label, values in counts
                          if (count := sum(i['status'] in values for i in items)))
     messages = {i['message'] for i in items}
     if status == 'failed' and len(messages) == 1:
@@ -136,7 +136,7 @@ def run_job(job_id, stop):
         nonlocal session
         if session is None:
             try:
-                session = collection_session(config.ROOT / '.env')
+                session = collection_session()
             except Exception as exc:
                 result = failure_result(exc)
                 logger.error('Collection session setup failed for job %s (%s)', job_id, type(exc).__name__)
@@ -206,7 +206,7 @@ def _run_job(job_id, stop, collect_meter):
                 c.execute('BEGIN IMMEDIATE')
                 c.execute("UPDATE collection_items SET status='skipped',message='삭제 또는 비활성화되어 수집에서 제외했습니다.',finished_at=? WHERE job_id=? AND status='queued' AND meter_id NOT IN (SELECT id FROM meters WHERE active=1 AND deleted_at IS NULL AND provider='arisu')", (db.now(), job_id))
                 c.execute("UPDATE collection_items SET status=?,message=?,started_at=COALESCE(started_at,?),finished_at=? WHERE job_id=? AND status IN ('queued','running')",
-                          (result['status'], '공통 연결 단계에서 중단했습니다. ' + result['message'], db.now(), db.now(), job_id))
+                          (result['status'], '아리수 연결 단계에서 중단했습니다. ' + result['message'], db.now(), db.now(), job_id))
             break
         with db.connect() as c:
             c.execute('UPDATE collection_items SET status=?,message=?,finished_at=?,daily_rows=?,bill_rows=?,connection_verified=? WHERE job_id=? AND meter_id=?',

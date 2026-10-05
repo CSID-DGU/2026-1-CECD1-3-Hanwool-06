@@ -11,6 +11,7 @@
 | `back/ml/lightgbm/results/` | 이전 LightGBM 실행 결과 |
 | `back/scripts/arisu_history/` | 이전 아리수 이력 수집·변환 도구와 설명 |
 | `back/pipelines/daily_water/detector.py` | 사용을 마친 STL·IsolationForest 분석기 |
+| `back/pipelines/daily_water/run_daily.py`, `back/pipelines/daily_ridership/run_daily.py` | 스냅샷을 갱신하지 않던 단독 수집 진입점; 현재는 `python -m back.pipelines.refresh --water --ridership` 사용 |
 | `back/scripts/dataset_etl/build_daily_usage_long.py` | 과거 역별 이력 CSV 병합 도구 |
 | `back/scripts/dataset_etl/build_clean_dataset.py` | 이전 일괄 변환 CLI 전체; 운영에는 청구 집계 함수만 유지 |
 | `back/scripts/dataset_etl/build_date_index.py` | 과거 고정 기간의 달력 생성 도구 |

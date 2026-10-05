@@ -1,13 +1,13 @@
 import { useMemo, useState } from "react";
-import { won, billGroundwater, billLabel, billNoticeNumber, billUsage, billWindow } from "./data";
-import { EmptyNote, InfoTooltip, SectionTitle } from "./ui";
+import { won, signedPct, billGroundwater, billLabel, billNoticeNumber, billUsage, billWindow, CHART_COLORS } from "./data";
+import { EmptyNote, SectionTitle } from "./ui";
 import LineChart from "./LineChart";
 import { pdfUrl } from "../../api.js";
 import FileLink from "../../components/FileLink.jsx";
 
 // Authenticated bill records. Missing readings stay blank in the document and chart.
 export default function Bill({ station, line }) {
-  if (!line.bills?.length) return <EmptyNote>등록된 청구서가 없습니다. 첫 청구자료 수집 후 열람할 수 있습니다.</EmptyNote>;
+  if (!line.bills?.length) return <EmptyNote>아직 수집된 청구서가 없습니다.</EmptyNote>;
   return <BillContent station={station} line={line} />;
 }
 
@@ -67,7 +67,7 @@ function BillContent({ station, line }) {
   const seasonYrs = comparisonBills.map((b) => b.year);
   const seasonYmin = Math.min(...seasonYrs);
   const seasonYmax = Math.max(...seasonYrs);
-  const seasonYears = `${seasonYmin}~${seasonYmax} · ${seasonYmax - seasonYmin + 1}년`;
+  const seasonYears = seasonYmin === seasonYmax ? `${seasonYmin}년` : `${seasonYmin}~${seasonYmax}년 평균`;
 
   const 상수도계 = bill.상수도_합계 ??
     (bill.상수도_기본료 != null && bill.상수도_사용료 != null ? bill.상수도_기본료 + bill.상수도_사용료 : null);
@@ -75,7 +75,7 @@ function BillContent({ station, line }) {
   return (
     <>
       <div className="dt-bill-toolbar">
-        <label className="dt-field">
+        <label className="form-field">
           청구 연도
           <select value={bill.year} onChange={(e) => onYear(e.target.value)}>
             {years.map((y) => (
@@ -85,7 +85,7 @@ function BillContent({ station, line }) {
             ))}
           </select>
         </label>
-        <label className="dt-field">
+        <label className="form-field">
           청구 월
           <select value={bill.month} onChange={(e) => onMonth(e.target.value)}>
             {monthsOfYear.map((m) => (
@@ -95,14 +95,13 @@ function BillContent({ station, line }) {
             ))}
           </select>
         </label>
-        <label className="dt-field">청구 구분<select value={keyOf(bill)} onChange={(e) => setSelected(e.target.value)}>{bills.filter((b) => b.ym === bill.ym).map((b) => <option key={keyOf(b)} value={keyOf(b)}>{billLabel(b)}</option>)}</select></label>
-        <span className="dt-bimonthly">청구자료가 있는 월만 표시 <InfoTooltip text="월별·격월 청구를 실제 청구 이력에 따라 표시합니다. 아래 비교 차트는 선택한 청구 구분 기준입니다." /></span>
-        {bill.id && <div className="pdf-actions"><FileLink href={pdfUrl(bill.id)} preview filename={pdfFilename}>PDF 열람 ↗</FileLink><FileLink href={pdfUrl(bill.id, true)} filename={pdfFilename}>PDF 다운로드</FileLink></div>}
+        <label className="form-field">청구 구분<select value={keyOf(bill)} onChange={(e) => setSelected(e.target.value)}>{bills.filter((b) => b.ym === bill.ym).map((b) => <option key={keyOf(b)} value={keyOf(b)}>{billLabel(b)}</option>)}</select></label>
+        {bill.id && <div className="pdf-actions"><FileLink href={pdfUrl(bill.id)} preview filename={pdfFilename}>PDF 열기</FileLink><FileLink href={pdfUrl(bill.id, true)} filename={pdfFilename}>PDF 다운로드</FileLink></div>}
       </div>
-      <p className="form-hint">PDF는 저장된 자료로 만든 청구내역 문서입니다. 공급기관의 원본 고지서와 구분됩니다.</p>
-      {(bill.summary_only || bill.detail_available === false) && <p className="data-notice">{bill.summary_only ? "요약 수집 · 상세 미확인 — 부과금액과 총사용량을 확인한 자료입니다." : "상세 미확인 — 확인된 청구 항목만 표시합니다."} 개별 요금·검침 내역의 빈칸은 확인되지 않은 값입니다.</p>}
+      <p className="form-hint">청구서가 있는 월만 고를 수 있습니다. PDF는 저장된 자료로 만든 문서이며, 아리수가 발행한 원본 고지서가 아닙니다.</p>
+      {(bill.summary_only || bill.detail_available === false) && <p className="data-notice">{bill.summary_only ? "부과금액과 총사용량만 수집된 청구서입니다." : "상세 내역 일부가 수집되지 않은 청구서입니다."} 빈칸은 확인되지 않은 값입니다.</p>}
 
-      {/* ── 사진1 재현 영역 ─────────────────────────────── */}
+      {/* 아리수 고지서 양식을 따른 청구 내역 */}
       <div className="dt-bill">
         <div className="dt-bill-top">
           <div>
@@ -263,13 +262,13 @@ function BillContent({ station, line }) {
 
       </div>
 
-      {/* ── 추세 + 전년대비 좌우 배치 ───────────────────── */}
-      {groundwater.usage != null && <p className="form-hint">비교 차트는 상·하수도 사용량 기준입니다. 지하수 사용량은 위 검침 내역에서 별도로 확인할 수 있습니다.</p>}
+      {/* 사용량 비교 차트 */}
+      {groundwater.usage != null && <p className="form-hint">아래 차트는 상·하수도 사용량 기준이며 지하수는 포함하지 않습니다.</p>}
       <div className="dt-bill-charts">
-        <div className="dt-bill-trend">
+        <div>
           <SectionTitle>최근 1년간 사용량</SectionTitle>
           <LineChart
-            series={[{ color: "#283891", values: trend.values, fill: true }]}
+            series={[{ color: CHART_COLORS.usage, values: trend.values, fill: true }]}
             xLabels={trend.labels}
             height={200}
             labelEvery={1}
@@ -281,30 +280,13 @@ function BillContent({ station, line }) {
           />
         </div>
 
-        <div className="dt-yoy">
-          <SectionTitle
-            right={
-              <>
-                <span className="dt-deltachip">
-                  전년 대비{" "}
-                  <b className={dPrev != null && dPrev > 0 ? "up" : "down"}>
-                    {dPrev == null ? "–" : `${dPrev > 0 ? "+" : ""}${dPrev}%`}
-                  </b>
-                </span>
-                <span className="dt-deltachip">
-                  이전 {histVals.length}개년 평균 대비{" "}
-                  <b className={dAvg != null && dAvg > 0 ? "up" : "down"}>
-                    {dAvg == null ? "–" : `${dAvg > 0 ? "+" : ""}${dAvg}%`}
-                  </b>
-                </span>
-              </>
-            }
-          >
+        <div>
+          <SectionTitle right={<span>전년 대비 <b>{signedPct(dPrev, "–")}</b>, 이전 {histVals.length}개년 평균 대비 <b>{signedPct(dAvg, "–")}</b></span>}>
             최근 5년 동월 비교
           </SectionTitle>
-          <div className="dt-yoy-chart">
+          <div>
             <LineChart
-              series={[{ color: "#b08a4f", values: yoyValues, fill: true }]}
+              series={[{ color: CHART_COLORS.usage, values: yoyValues, fill: true }]}
               xLabels={yoyLabels}
               height={185}
               labelEvery={1}
@@ -317,11 +299,11 @@ function BillContent({ station, line }) {
           </div>
         </div>
 
-        <div className="dt-yoy">
-          <SectionTitle right={<span className="dt-risk-date">{seasonYears} 평균</span>}>계절별 추이</SectionTitle>
-          <div className="dt-yoy-chart">
+        <div>
+          <SectionTitle right={seasonYears}>청구월별 평균 사용량</SectionTitle>
+          <div>
             <LineChart
-              series={[{ color: "#0e7c7b", values: seasonValues, fill: true }]}
+              series={[{ color: CHART_COLORS.usage, values: seasonValues, fill: true }]}
               xLabels={seasonLabels}
               height={185}
               labelEvery={1}

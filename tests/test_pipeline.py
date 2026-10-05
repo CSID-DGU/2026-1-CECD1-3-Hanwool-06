@@ -265,8 +265,14 @@ class PipelineTest(unittest.TestCase):
         with patch.dict('os.environ', {'ARISU_USER_ID': 'new', 'ARISU_USER_PWD': 'pwd',
                                       'I121_USER_ID': 'old', 'I121_USER_PWD': 'oldpwd'}, clear=True):
             with patch.object(auth, 'login', return_value='session') as login:
-                self.assertEqual(auth.session_from_env(self.path / 'missing.env'), 'session')
+                self.assertEqual(auth.session_from_env(), 'session')
                 login.assert_called_once_with('new', 'pwd')
+        # Collectors use the process environment only; reading a .env is left to back.api.config.
+        with patch.dict('os.environ', {}, clear=True):
+            with self.assertRaises(auth.ConfigurationError):
+                auth.session_from_env()
+            with self.assertRaises(RuntimeError):
+                riders._load_key()
         session = Mock()
         session.get.return_value = Mock(text='<input name="userId">', url='https://x/NR_loginForm.do')
         with patch.object(auth, '_new_session', return_value=session):

@@ -14,16 +14,8 @@ def daily_summary(date=None, office_ids=None):
     alert = sum(x['심각도'] == '경고' for x in items)
     warn = sum(x['심각도'] == '주의' for x in items)
     errors = sum(x['likely_data_error'] for x in evaluated)
-    headline = f'{date} 기준 경고 {alert}건 · 주의 {warn}건' + (f' · 자료 확인 {errors}건' if errors else '')
-    actions = (['경고 항목부터 확인하세요.' if alert else '주의 항목의 사용량 변동을 확인하세요.'] if alert or warn else [])
-    if errors:
-        actions.append('자료 확인 항목은 원자료를 확인한 뒤 다시 분석하세요.')
-    return {'기준일': date, 'headline': headline if evaluated else f'{date} 분석 데이터가 없습니다.',
-            'counts': {'경고': alert, '주의': warn, '자료 확인': errors, '총': len(items), '분석': len(evaluated) - errors},
-            'items': [{**x, 'dir': x['방향'], 'err_ton': x['error_ton'],
-                       'action': '청구·사용량 원자료 확인' if x['likely_data_error'] else '사용량 변동과 역 운영 현황 확인'} for x in items],
-            'actions': actions or (['분석 데이터 수집 상태를 확인하세요.'] if not evaluated else ['확인된 분석 범위에 이상징후가 없습니다.']),
-            'calendar': data_access.calendar_info(date), 'generated_by': 'rule'}
+    return {'기준일': date, 'items': items, 'calendar': data_access.calendar_info(date),
+            'counts': {'경고': alert, '주의': warn, '자료 확인': errors, '총': len(items), '분석': len(evaluated) - errors}}
 
 
 def analyze_cause(meter_id, date=None, office_ids=None):
@@ -34,7 +26,7 @@ def analyze_cause(meter_id, date=None, office_ids=None):
     cal = data_access.calendar_info(date)
     result = {'meter_id': meter_id, '역명': item['역명'], '날짜': date, 'anomaly': item, 'calendar': cal}
     if not config.openai_ready():
-        return {**result, 'analysis': {'error': 'OPENAI_API_KEY 미설정 — 원인 분석을 사용하려면 .env를 설정하세요.'}, 'generated_by': 'none'}
+        return {**result, 'analysis': {'error': '원인 분석을 쓰려면 서버에 OPENAI_API_KEY를 설정해야 합니다.'}, 'generated_by': 'none'}
     # Customer identifiers, addresses, names and emails do not leave the application.
     facts = {k: item[k] for k in ('역명', '날짜', '심각도', '방향', 'predicted_ton', 'actual_ton', 'error_ton', 'pct', 'likely_data_error')}
     history = [{k: r[k] for k in ('날짜', 'actual_ton', 'predicted_ton', '심각도')}
@@ -69,4 +61,4 @@ def analyze_cause(meter_id, date=None, office_ids=None):
         return {**result, 'analysis': parsed, 'generated_by': config.OPENAI_MODEL}
     except Exception as exc:
         logger.warning('External analysis failed (%s)', type(exc).__name__)
-        return {**result, 'analysis': {'error': '외부 분석 서비스 응답을 확인하지 못했습니다. API 설정을 확인하고 다시 시도하세요.'}, 'generated_by': 'none'}
+        return {**result, 'analysis': {'error': '분석 서비스에서 답을 받지 못했습니다. 잠시 후 다시 시도하세요.'}, 'generated_by': 'none'}

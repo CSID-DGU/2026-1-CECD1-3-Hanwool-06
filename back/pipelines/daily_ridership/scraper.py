@@ -13,7 +13,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import sys
 import time
 import urllib.error
 import urllib.request
@@ -21,10 +20,6 @@ from collections import defaultdict
 from datetime import date
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-from dotenv import load_dotenv
 from back.pipelines.common import RUNTIME, collector_meters, customer_number, merge_csv, write_json
 ENDPOINT = "https://apis.data.go.kr/B553766/psgr/getStnPsgr"
 OUT_DIR = RUNTIME / "daily" / "ridership"
@@ -32,7 +27,6 @@ NUM_OF_ROWS = 1000   # 하루 ≈ 66k행 → ~66콜/일 (일일한도 10,000)
 
 
 def _load_key() -> str:
-    load_dotenv(PROJECT_ROOT / ".env", override=False)
     key = os.getenv("SEOUL_PSGR_KEY", "").strip()
     if not key:
         raise RuntimeError("SEOUL_PSGR_KEY is not configured")

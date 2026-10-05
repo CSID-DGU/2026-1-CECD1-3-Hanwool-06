@@ -1,10 +1,8 @@
-import { buildStations } from "../Detail/data.js";
-export const lineMeta = {
-  1: { name: "1호선", color: "#0052a4" }, 2: { name: "2호선", color: "#00a84d" },
-  3: { name: "3호선", color: "#ef7c1c" }, 4: { name: "4호선", color: "#00a5de" },
-  5: { name: "5호선", color: "#996cac" }, 6: { name: "6호선", color: "#cd7c2f" },
-  7: { name: "7호선", color: "#747f00" }, 8: { name: "8호선", color: "#e6186c" },
-  9: { name: "9호선", color: "#8e6e2e" },
+import { buildStations, SEVERITY_TONE } from "../Detail/data.js";
+// 서울교통공사 노선색.
+export const lineColors = {
+  1: "#0052a4", 2: "#00a84d", 3: "#ef7c1c", 4: "#00a5de", 5: "#996cac",
+  6: "#cd7c2f", 7: "#747f00", 8: "#e6186c", 9: "#8e6e2e",
 };
 export const riskMeta = {
   all: { label: "전체", tone: "all" }, alert: { label: "경고", tone: "alert" },
@@ -14,7 +12,6 @@ export const riskMeta = {
   pending: { label: "첫 수집 대기", tone: "pending" },
   billing_only: { label: "청구 전용", tone: "billing" },
 };
-const SEV = { 경고: "alert", 주의: "warn", 정상: "ok" };
 export function buildDashboard(data) {
   const stations = buildStations(data.bills, data.stations, data.daily, data.risk, data.meters).flatMap((s) => s.lines.map((l) => {
     const reference = data.status?.reference_date || data.status?.latest_risk;
@@ -23,8 +20,8 @@ export function buildDashboard(data) {
       id: l.meterId, stationId: s.id, name: s.역명, displayName: l.display_name || l.고객번호,
       dataMode: l.dataMode, latestBillMonth: l.bills.at(-1)?.ym || "",
       office: l.영업사업소, officeId: String(l.office_id ?? ""), lines: [String(l.line)],
-      risk: l.dataMode === "billing_only" ? "billing_only" : l.dataMode === "pending" ? "pending" : l.riskError || stale ? "unknown" : SEV[l.risk?.severity] || "analysis_pending",
-      riskDetail: l.dataMode === "billing_only" ? "청구·요금 자료 제공" : l.dataMode === "pending" ? "수집 대상 등록됨" : l.riskError ? "최근 분석 자료 확인 필요" : stale ? "이전 기준일 자료" : !l.risk ? "일일 사용량 수집됨" : "",
+      risk: l.dataMode === "billing_only" ? "billing_only" : l.dataMode === "pending" ? "pending" : l.riskError || stale ? "unknown" : SEVERITY_TONE[l.risk?.severity] || "analysis_pending",
+      riskDetail: l.dataMode !== "daily" ? "" : l.riskError ? "최근 관측값 오류" : stale ? "분석일이 오래됨" : "",
       customerNo: l.고객번호, usage: l.daily?.at(-1)?.value ?? l.risk?.actual ?? null,
       delta: l.risk?.pct ?? null,
       dailyDate: l.daily?.at(-1)?.date || "", riskDate: l.risk?.기준일 || "", dailyEnabled: l.daily_enabled,

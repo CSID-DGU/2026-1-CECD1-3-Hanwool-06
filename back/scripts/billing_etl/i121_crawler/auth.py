@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 
 import requests
 from bs4 import BeautifulSoup
-from dotenv import load_dotenv
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+from back.api import config  # noqa: F401  # the one place a development .env is read; never in production
 from .parser import discover_mkeys
 
 
@@ -107,12 +106,8 @@ def _looks_like_login_page(html: str) -> bool:
     return bool(soup.select_one('input[name="userId"], input[name="userPwd"], input[name="mbrId"], input[name="pwd"]'))
 
 
-def session_from_env(env_path: Path | str | None = None) -> requests.Session:
-    """ARISU credentials; I121 names remain accepted for older installations."""
-    if env_path is not None:
-        load_dotenv(dotenv_path=env_path, override=False)
-    else:
-        load_dotenv(override=False)
+def session_from_env() -> requests.Session:
+    """ARISU credentials from the process environment; I121 names remain accepted for older installations."""
     user_id = (os.environ.get("ARISU_USER_ID") or os.environ.get("I121_USER_ID", "")).strip()
     user_pwd = os.environ.get("ARISU_USER_PWD") or os.environ.get("I121_USER_PWD", "")
     if not user_id or not user_pwd:
@@ -123,10 +118,10 @@ def session_from_env(env_path: Path | str | None = None) -> requests.Session:
     return login(user_id, user_pwd)
 
 
-def collection_session(env_path=None):
+def collection_session():
     """A member-login failure must not prevent public customer/name bill lookup."""
     try:
-        return session_from_env(env_path)
+        return session_from_env()
     except (LoginError, requests.RequestException) as exc:
         session = _new_session()
         session.arisu_customer_numbers = frozenset()

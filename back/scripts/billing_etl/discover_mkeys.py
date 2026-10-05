@@ -36,12 +36,6 @@ def parse_args() -> argparse.Namespace:
         default=RAW_DIR / "i121_cache",
         help="where to save the raw landing HTML for debugging",
     )
-    parser.add_argument(
-        "--env-path",
-        type=Path,
-        default=ROOT / ".env",
-        help="path to .env containing ARISU_USER_ID / ARISU_USER_PWD",
-    )
     return parser.parse_args()
 
 
@@ -50,10 +44,7 @@ def main() -> int:
     args.cache_dir.mkdir(parents=True, exist_ok=True)
     args.out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    if args.env_path.exists():
-        session = session_from_env(env_path=args.env_path)
-    else:
-        session = session_from_env()
+    session = session_from_env()
     print("login ok", flush=True)
 
     response = session.get(MYARISU_URL, params={"_m": "m6"}, timeout=30)

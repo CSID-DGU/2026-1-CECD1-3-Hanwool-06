@@ -49,7 +49,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--mkeys-path", type=Path, help="optional explicit customer-number JSON; defaults to the current meter registry")
     parser.add_argument("--cache-dir", type=Path, default=RAW_DIR / "i121_cache")
     parser.add_argument("--out-dir", type=Path, default=RAW_DIR / "i121_bills")
-    parser.add_argument("--env-path", type=Path, default=ROOT / ".env")
     parser.add_argument("--sleep", type=float, default=1.5, help="seconds to sleep between live fetches")
     parser.add_argument("--floor-year", type=int, default=2008, help="stop iterating below this year")
     parser.add_argument("--max-mkeys", type=int, default=None, help="limit to first N mkeys (debug)")
@@ -73,7 +72,7 @@ def collect_bills(*, start_ym, end_ym, mkeys=None, session=None, cache_dir=None,
         raise ValueError("No registered Arisu contracts")
     cache_dir = Path(cache_dir or RAW_DIR / "i121_cache")
     out_dir = Path(out_dir or RAW_DIR / "i121_bills")
-    session = session or collection_session(ROOT / ".env")
+    session = session or collection_session()
     bills, errors = [], []
     for mkey in mkeys:
         window_end = end_ym
@@ -141,7 +140,7 @@ def main() -> int:
         report = collect_bills(start_ym=args.start_ym or f"{args.floor_year}-01",
             end_ym=args.end_ym or today().strftime("%Y-%m"), mkeys=mkeys,
             cache_dir=args.cache_dir, out_dir=args.out_dir, sleep=args.sleep,
-            session=collection_session(args.env_path), customer_names=names)
+            session=collection_session(), customer_names=names)
     print(report)
     return 1 if report["errors"] else 0
 

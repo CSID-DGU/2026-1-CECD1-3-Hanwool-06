@@ -65,7 +65,7 @@ def current_user(request: Request):
         user['csrf_token'] = row['csrf_token']
     if request.method not in ('GET', 'HEAD', 'OPTIONS'):
         check_origin(request)
-        if not hmac.compare_digest(request.headers.get('x-csrf-token', ''), user['csrf_token']):
+        if not hmac.compare_digest(request.headers.get('x-csrf-token', '').encode(), user['csrf_token'].encode()):
             raise HTTPException(403, '세션 확인에 실패했습니다. 다시 로그인하세요.')
     if user['must_change_password'] and request.url.path not in ('/api/auth/me', '/api/auth/password', '/api/auth/logout'):
         raise HTTPException(403, '임시 비밀번호를 먼저 변경하세요.')

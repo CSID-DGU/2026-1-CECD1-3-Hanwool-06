@@ -95,35 +95,6 @@ def parse_bill_list(html: str, *, customer: str | None = None) -> list[dict[str,
     return rows
 
 
-def parse_payment_list(html: str) -> list[dict[str, Any]]:
-    """Parse 납부내역 table from NR_myArisu.do response."""
-    soup = BeautifulSoup(html, "html.parser")
-    table = _find_table_by_caption(soup, "납부내역이며")
-    if table is None:
-        return []
-    tbody = table.find("tbody")
-    if not isinstance(tbody, Tag):
-        return []
-    rows: list[dict[str, Any]] = []
-    for tr in tbody.find_all("tr"):
-        cells = tr.find_all("td")
-        if len(cells) < 5:
-            continue
-        mkey = _clean(cells[0].get_text())
-        if not _MKEY_RE.match(mkey):
-            continue
-        rows.append(
-            {
-                "mkey": mkey,
-                "paid_amount_won": _to_int(cells[1].get_text()),
-                "payment_method": _clean(cells[2].get_text()),
-                "paid_date": _clean(cells[3].get_text()),
-                "address": _clean(cells[4].get_text()),
-            }
-        )
-    return rows
-
-
 def _find_table_by_caption(soup: BeautifulSoup, caption_substring: str) -> Tag | None:
     for cap in soup.find_all("caption"):
         if caption_substring in cap.get_text():

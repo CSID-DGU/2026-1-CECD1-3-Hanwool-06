@@ -79,7 +79,7 @@ class IncrementalTest(unittest.TestCase):
         self.assertEqual(result['status'], 'empty')
         self.assertFalse(result['connection_verified'])
         self.assertTrue(result['daily_available'])
-        self.assertIn('단정할 수 없습니다', result['message'])
+        self.assertIn('볼 수 없는 고객번호일 수 있습니다', result['message'])
         self.assertEqual(manifest.read_bytes(), before)
         with db.connect() as conn:
             self.assertEqual(conn.execute('SELECT COUNT(*) FROM bills').fetchone()[0], 1)

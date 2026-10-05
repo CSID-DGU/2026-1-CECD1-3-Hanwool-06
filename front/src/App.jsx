@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Dashboard from "./pages/Dashboard/Dashboard.jsx";
 import DetailPage from "./pages/Detail/DetailPage.jsx";
 import ManagementPage from "./pages/ManagementPage.jsx";
@@ -16,6 +16,8 @@ export default function App() {
   const [session, setSession] = useState(undefined);
   const [setupRequired, setSetupRequired] = useState(false);
   const [data, setData] = useState(null);
+  const dataRef = useRef(null);
+  dataRef.current = data;
   const [error, setError] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
@@ -59,7 +61,7 @@ export default function App() {
     const load = async () => {
       if (running) return;
       running = true; setRefreshing(true);
-      try { const next = await getData(); if (alive) { setData(next); setError(""); } }
+      try { const next = await getData(dataRef.current?.version); if (alive) { if (next) setData(next); setError(""); } }
       catch (e) { if (alive && e.status !== 401) setError(e.message); }
       finally { running = false; if (alive) setRefreshing(false); }
     };
@@ -74,18 +76,16 @@ export default function App() {
     try { await logout(); setSession(null); setData(null); setCsrfToken(); setSummaryOpen(false); }
     catch (e) { setError(e.message); }
   }
-  if (session === undefined) return <main className="auth-page"><p role="status">접속 권한을 확인하는 중…</p></main>;
+  if (session === undefined) return <main className="auth-page"><p role="status">확인 중…</p></main>;
   if (!session) return <LoginPage setupRequired={setupRequired} onLogin={establish} error={error} onRetry={checkSession} />;
 
   return <>
     <a className="skip-link" href="#main-content" onClick={(e) => { e.preventDefault(); document.getElementById("main-content")?.focus(); }}>본문으로 이동</a>
-    <AppHeader logo={logo} user={session} hash={hash} onLogout={signOut} onSummary={() => setSummaryOpen(true)} />
-    <div className="session-strip"><span>{session.role === "superadmin" ? "전체 사업소 관제" : "담당 사업소 관제"} · 권한 범위의 자료만 표시</span>
-      <button type="button" onClick={refresh} disabled={refreshing}>{refreshing ? "자료 확인 중…" : "새로고침"}</button></div>
+    <AppHeader logo={logo} user={session} hash={hash} refreshing={refreshing} onRefresh={refresh} onLogout={signOut} onSummary={() => setSummaryOpen(true)} />
     {error && <div className="app-error" role="alert">{error} <button onClick={refresh}>다시 시도</button></div>}
     <div id="main-content" tabIndex={-1}>
       {session.must_change_password || hash.startsWith("#/account") ? <PasswordPage user={session} onChanged={() => establish()} />
-      : !data ? <main className="management-page"><p role="status">{error ? "자료를 불러오지 못했습니다." : "관제 자료를 불러오는 중…"}</p></main>
+      : !data ? <main className="management-page"><p role="status">{error ? "자료를 불러오지 못했습니다." : "불러오는 중…"}</p></main>
       : hash.startsWith("#/users") || hash.startsWith("#/meters") ? <ManagementPage data={data} user={session} kind={hash.startsWith("#/users") ? "users" : "meters"} onSaved={refresh} collection={collection} />
       : hash.startsWith("#/statistics") ? <StatisticsPage data={data} />
       : hash.startsWith("#/detail") ? <DetailPage data={data} hash={hash} collection={collection} />

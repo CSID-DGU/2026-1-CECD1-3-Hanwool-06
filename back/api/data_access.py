@@ -1,5 +1,6 @@
 """Use the same private snapshot and registry as the dashboard, scoped before analysis."""
 from datetime import date as Date
+from back.pipelines.common import today
 from . import catalog, config, db
 
 SEV_RANK = {'정상': 0, '주의': 1, '경고': 2}
@@ -15,7 +16,7 @@ def reference_date(office_ids=None):
     dates = [r['date'] for cid in ids for r in risk.get(cid, [])]
     if not dates:
         dates = [r['date'] for cid in ids for r in daily.get(cid, {}).get('usage', [])]
-    return max(dates, default=Date.today().isoformat())
+    return max(dates, default=today().isoformat())
 
 
 def calendar_info(date):

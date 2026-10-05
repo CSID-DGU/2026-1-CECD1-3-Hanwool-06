@@ -36,7 +36,8 @@ export const getMe = () => request("/auth/me");
 export const login = (email, password) => request("/auth/login", { method: "POST", body: { email, password } });
 export const logout = () => request("/auth/logout", { method: "POST" });
 export const changePassword = (body) => request("/auth/password", { method: "POST", body });
-export const getData = () => request("/data");
+// The server answers 204 (null here) while the scoped data still matches `version`.
+export const getData = (version) => request(`/data${version ? `?version=${encodeURIComponent(version)}` : ""}`);
 export const getUsers = () => request("/users");
 export const getMeters = (includeDeleted = false) => request(`/meters${includeDeleted ? "?include_deleted=true" : ""}`);
 export const saveUser = (id, body) => request(`/users${id ? `/${encodeURIComponent(id)}` : ""}`, { method: id ? "PATCH" : "POST", body });

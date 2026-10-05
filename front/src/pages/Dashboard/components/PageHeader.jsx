@@ -1,11 +1,24 @@
-export default function PageHeader({ status }) {
-  const basis = status.reference_date;
-  const dateText = (value) => value ? String(value).replace("T", " ").slice(0, 16) : "수집 전";
-  return <section className="page-head">
-    <div><span className="eyebrow">WATER MONITORING</span><h1>상수도 관제 현황</h1>
-      <p className="head-desc">담당 사업소의 계량기 상태와 이상징후를 확인합니다.</p></div>
-    <div className="head-status"><span>{status.latest_risk ? "위험도 분석 기준" : "자료 기준"}</span><strong>{basis || "자료 수집 대기"}</strong>
-      <span className="head-collected">사용량 {dateText(status.latest_usage)} · 승하차 {dateText(status.latest_ridership)}</span>
-      <span className="head-collected">위험도 {dateText(status.latest_risk)} · 화면은 1분마다 확인</span></div>
-  </section>;
+// 화면 제목, 현황 한 줄, 자료별 기준일.
+export default function PageHeader({ status, daily, alerts, warnings }) {
+  const day = (value) => (value ? String(value).slice(0, 10) : "없음");
+  return (
+    <section className="page-head">
+      <div>
+        <h1>상수도 관제 현황</h1>
+        <p className="head-summary">
+          {daily
+            ? <>일일 관제 계량기 {daily}개 가운데 <strong className={alerts ? "is-alert" : ""}>경고 {alerts}건</strong>, <strong className={warnings ? "is-warn" : ""}>주의 {warnings}건</strong>입니다.</>
+            : "일일 사용량을 수집하는 계량기가 아직 없습니다."}
+        </p>
+      </div>
+      <div className="data-dates">
+        <span>자료 기준일</span>
+        <dl>
+          <div><dt>위험도 분석</dt><dd>{day(status.latest_risk)}</dd></div>
+          <div><dt>사용량</dt><dd>{day(status.latest_usage)}</dd></div>
+          <div><dt>승하차</dt><dd>{day(status.latest_ridership)}</dd></div>
+        </dl>
+      </div>
+    </section>
+  );
 }

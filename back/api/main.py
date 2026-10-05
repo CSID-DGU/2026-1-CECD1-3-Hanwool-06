@@ -12,10 +12,11 @@ from urllib.parse import quote
 from fastapi import Body, Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.middleware.trustedhost import TrustedHostMiddleware
+from back.pipelines.common import today
 from . import agent, auth, catalog, collection, config, data_access, db, documents, mailer
 
 
@@ -43,14 +44,27 @@ app.add_middleware(TrustedHostMiddleware, allowed_hosts=config.ALLOWED_HOSTS)
 app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=5)
 
 
+MAX_BODY_BYTES = 1_000_000
+# The built SPA loads only its own scripts, styles and images; React sets styles through the DOM.
+CONTENT_SECURITY_POLICY = ("default-src 'self'; img-src 'self' data:; object-src 'none'; "
+                           "base-uri 'self'; form-action 'self'; frame-ancestors 'self'")
+
+
 @app.middleware('http')
 async def private_headers(request, call_next):
-    response = await call_next(request)
+    # Every request body is a small JSON form; refuse larger or unframed ones before reading them.
+    length = request.headers.get('content-length', '0')
+    if 'transfer-encoding' in request.headers or not length.isdigit() or int(length) > MAX_BODY_BYTES:
+        response = JSONResponse({'detail': '요청 본문이 너무 큽니다.'}, status_code=413)
+    else:
+        response = await call_next(request)
     response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers['Referrer-Policy'] = 'same-origin'
     response.headers['X-Frame-Options'] = 'SAMEORIGIN'
     if request.url.path.startswith('/api/'):
         response.headers['Cache-Control'] = 'no-store'
+    else:
+        response.headers['Content-Security-Policy'] = CONTENT_SECURITY_POLICY
     if config.COOKIE_SECURE:
         response.headers['Strict-Transport-Security'] = 'max-age=31536000'
     return response
@@ -159,8 +173,14 @@ def password(body: Password, request: Request, user=Depends(auth.current_user)):
 
 
 @app.get('/api/data')
-def data(user=Depends(auth.current_user)):
-    return catalog.payload(auth.office_scope(user))
+def data(version: str | None = None, user=Depends(auth.current_user)):
+    scope = auth.office_scope(user)
+    # Fingerprint first: a change during the build then costs one more reload, never stale data.
+    current = catalog.data_version(scope)
+    if version == current:
+        return Response(status_code=204)
+    # The payload is plain JSON data already; skip FastAPI's per-item encoder for this large response.
+    return JSONResponse({'version': current} | catalog.payload(scope))
 
 
 @app.get('/api/offices')
@@ -201,7 +221,7 @@ def meter_values(c, body, user, existing=None):
     if not cid or (value['provider'] == 'arisu' and not re.fullmatch(r'\d{9}', cid)):
         raise HTTPException(422, '아리수 고객번호는 앞자리 0을 포함한 9자리입니다.')
     if existing and (cid != existing['customer_number'] or value['provider'] != existing['provider']):
-        raise HTTPException(422, '고객번호·공급기관 변경은 새 계량기로 등록하세요. 기존 이력은 보존됩니다.')
+        raise HTTPException(422, '고객번호나 공급기관이 바뀌었다면 새 계량기로 등록하세요.')
     if not value['display_name']:
         raise HTTPException(422, '계량기 표시명을 입력하세요.')
     if value['line'] and not re.fullmatch(r'[1-9]', value['line']):
@@ -212,7 +232,7 @@ def meter_values(c, body, user, existing=None):
             raise HTTPException(422, f'{key}는 참/거짓이어야 합니다.')
         value[key] = int(raw)
     if value['provider'] != 'arisu' and value['daily_enabled']:
-        raise HTTPException(422, '아리수 고객번호만 일일 자동 수집을 활성화할 수 있습니다.')
+        raise HTTPException(422, '일일 사용량은 아리수 계량기만 수집할 수 있습니다.')
     auth.require_office(user, value['office_id'])
     if not c.execute('SELECT 1 FROM offices WHERE id=?', (value['office_id'],)).fetchone():
         raise HTTPException(422, '등록된 사업소를 선택하세요.')
@@ -228,7 +248,7 @@ def meter_values(c, body, user, existing=None):
     # Coordinates describe the physical station shared by several meters.
     if 'map_x' in body or 'map_y' in body:
         if user['role'] != 'superadmin':
-            raise HTTPException(403, '공용 노선도 위치는 총괄 관리자만 변경할 수 있습니다.')
+            raise HTTPException(403, '노선도 위치는 총괄 관리자만 바꿀 수 있습니다.')
         x, y = value.get('map_x'), value.get('map_y')
         if not all(isinstance(v, (int, float)) and 0 <= v <= 100 for v in (x, y)):
             raise HTTPException(422, '지도 위치는 0~100 사이의 x,y 값을 함께 입력하세요.')
@@ -270,7 +290,7 @@ def save_meter(body, user, meter_id=None):
             db.audit(c, user['id'], 'meter_update' if existing else 'meter_create', meter_id, {k: body[k] for k in body if k != 'metadata'})
             return get_meter(c, meter_id, user)
     except sqlite3.IntegrityError:
-        raise HTTPException(409, '이미 등록된 공급기관·고객번호입니다. 기존 계량기의 정보 업데이트를 실행하거나 삭제 목록에서 복원하세요.') from None
+        raise HTTPException(409, '이미 등록된 고객번호입니다.') from None
 
 
 @app.post('/api/meters', status_code=201)
@@ -448,21 +468,24 @@ def analysis_input(body, user):
     date = checked_date(body.date or data_access.reference_date(auth.office_scope(user)))
     item = data_access.find_one(body.meter_id, date, auth.office_scope(user))
     if not item:
-        raise HTTPException(404, '해당 계량기와 날짜의 분석 데이터가 없습니다.')
+        raise HTTPException(404, '이 계량기는 해당 날짜의 분석 자료가 없습니다.')
     if item['likely_data_error']:
-        raise HTTPException(422, '자료 확인이 필요한 관측값입니다. 원자료를 확인한 뒤 원인 분석과 이상 알림을 요청하세요.')
+        raise HTTPException(422, '관측값에 오류가 있어 분석과 알림을 쓸 수 없습니다. 원자료를 먼저 확인하세요.')
     return meter, date, item
+
+
+def attempts_last_hour(c, actor_id, action):
+    cutoff = datetime.fromtimestamp(time.time() - 3600, timezone.utc).isoformat(timespec='seconds')
+    return c.execute('SELECT count(*) FROM audit_log WHERE actor_id=? AND action=? AND created_at>=?', (actor_id, action, cutoff)).fetchone()[0]
 
 
 @app.post('/api/analyze')
 def analyze(body: Analyze, user=Depends(auth.current_user)):
     _, date, _ = analysis_input(body, user)
     if config.openai_ready():
-        cutoff = datetime.fromtimestamp(time.time() - 3600, timezone.utc).isoformat(timespec='seconds')
         with db.connect() as c:
             c.execute('BEGIN IMMEDIATE')
-            recent = c.execute("SELECT count(*) FROM audit_log WHERE actor_id=? AND action='analyze_attempt' AND created_at>=?", (user['id'], cutoff)).fetchone()[0]
-            if recent >= 20:
+            if attempts_last_hour(c, user['id'], 'analyze_attempt') >= 20:
                 raise HTTPException(429, '원인 분석은 계정당 한 시간에 20회까지 요청할 수 있습니다.')
             db.audit(c, user['id'], 'analyze_attempt', body.meter_id + ':' + date)
     return agent.analyze_cause(body.meter_id, date, auth.office_scope(user))
@@ -479,6 +502,8 @@ def alert(body: Analyze, user=Depends(auth.current_user)):
         recent = c.execute("SELECT created_at FROM audit_log WHERE action IN ('alert_attempt','alert_sent') AND target=? ORDER BY id DESC LIMIT 1", (body.meter_id + ':' + item['날짜'],)).fetchone()
         if recent and recent[0] > datetime.fromtimestamp(time.time()-60, timezone.utc).isoformat(timespec='seconds'):
             raise HTTPException(429, '같은 항목은 1분 후 다시 발송할 수 있습니다.')
+        if attempts_last_hour(c, user['id'], 'alert_attempt') >= 30:
+            raise HTTPException(429, '이상 알림은 계정당 한 시간에 30회까지 발송할 수 있습니다.')
         db.audit(c, user['id'], 'alert_attempt', body.meter_id + ':' + item['날짜'])
     result = mailer.send_mail(f"[{item['심각도']}] {item['역명']} 수도 사용량 확인 ({item['날짜']})", mailer.build_alert_html(item), ','.join(recipients))
     with db.connect() as c:
@@ -490,9 +515,10 @@ def alert(body: Analyze, user=Depends(auth.current_user)):
 def bill_pdf(bill_id: str, download: bool = False, user=Depends(auth.current_user)):
     with db.connect() as c:
         bill = c.execute('SELECT * FROM bills WHERE id=?', (bill_id,)).fetchone()
-        if bill is None:
+        # A bill outside the caller's scope is indistinguishable from a missing one.
+        meter = bill and next((m for m in catalog.list_meters(c, auth.office_scope(user)) if m['id'] == bill['meter_id']), None)
+        if not meter:
             raise HTTPException(404, '청구내역을 찾을 수 없습니다.')
-        meter = get_meter(c, bill['meter_id'], user)
     payload = json.loads(bill['payload']) | {'id': bill['id'], 'source': bill['source'], 'gubun': bill['gubun'], 'notice_number': bill['notice_number']}
     suffix = '_' + bill['notice_number'] if bill['notice_number'] else ''
     name = f"{meter['display_name']}_{bill['period']}_{bill['gubun']}{suffix}.pdf"
@@ -503,7 +529,7 @@ def bill_pdf(bill_id: str, download: bool = False, user=Depends(auth.current_use
 def export_rows(user, kind, start=None, end=None, office_id=None, line=None, meter_id=None):
     if kind not in ('usage', 'bills'):
         raise HTTPException(422, 'kind는 usage 또는 bills여야 합니다.')
-    start, end = checked_date(start or '2000-01-01'), checked_date(end or Date.today().isoformat())
+    start, end = checked_date(start or '2000-01-01'), checked_date(end or today().isoformat())
     if start > end:
         raise HTTPException(422, '시작일은 종료일보다 늦을 수 없습니다.')
     if office_id:
@@ -554,7 +580,7 @@ def statistics(start: str | None = None, end: str | None = None, office_id: str 
                 if number is not None:
                     group[target] = round((group[target] or 0) + number, 3)
             group['observation_count' if kind == 'usage' else 'bill_count'] += 1
-    return {'rows': [groups[key] for key in sorted(groups)], 'note': '일 사용량은 관측일, 요금은 청구월 기준입니다. 요금은 납부금액을 우선 합산하며 상세 미확인 건은 부과금액으로 집계합니다. 상세 미확인 요금은 수납상태를 별도로 확인하세요. 결측은 합산하지 않습니다.'}
+    return {'rows': [groups[key] for key in sorted(groups)], 'note': '일일 사용량은 검침일, 요금은 청구월을 기준으로 합산했습니다. 납부금액이 없는 청구서는 부과금액으로 계산했고, 값이 없는 항목은 합계에서 뺐습니다.'}
 
 
 # Only explicitly built frontend assets are public; raw data directories are never mounted.

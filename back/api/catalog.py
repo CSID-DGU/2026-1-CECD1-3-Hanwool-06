@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import math
 import re
@@ -148,8 +149,17 @@ def collector_meters():
         return list_meters(conn)
 
 
+def _stat(path):
+    """(mtime, size), or None when absent, including a file removed between two checks."""
+    try:
+        info = Path(path).stat()
+        return info.st_mtime_ns, info.st_size
+    except OSError:
+        return None
+
+
 def _signature(paths):
-    return tuple((str(p), p.stat().st_mtime_ns, p.stat().st_size) for p in paths if p.exists())
+    return tuple((str(p), *state) for p in paths if (state := _stat(p)))
 
 
 @lru_cache(maxsize=2)
@@ -225,7 +235,8 @@ def _snapshot_data(signature):
     return tuple(_json(path) for path, *_ in signature)
 
 
-def data_sources():
+def _sources():
+    """Loader and files of the published snapshot, else of the repository data."""
     snapshot = config.DATA_DIR / "snapshot"
     manifest = _json(snapshot / "manifest.json")
     if manifest.get("published"):
@@ -233,12 +244,31 @@ def data_sources():
         if directory.is_relative_to(snapshot.resolve()):
             paths = [directory / "daily.json", directory / "risk.json"]
             if all(p.is_file() for p in paths):
-                return _snapshot_data(_signature(paths))
+                return _snapshot_data, paths
     paths = [config.ROOT / p for p in ("data/processed/daily_water_usage.csv", "data/processed/ridership.csv",
              "data/ml_dataset/master.csv")]
     paths.append(config.SEED_DIR / 'risk/test_anomalies.csv')
     paths += sorted((config.ROOT / "data/daily").glob("*/*.csv"))
-    return _fallback_data(_signature(paths))
+    return _fallback_data, paths
+
+
+def data_sources():
+    loader, paths = _sources()
+    return loader(_signature(paths))
+
+
+def data_version(office_ids=None):
+    """Fingerprint of everything payload() reads for this scope, without building it.
+
+    A commit rewrites the database file or leaves frames in its WAL, and publication points
+    the manifest at new snapshot files. Bookkeeping writes change it too, which only costs
+    one more full response. An empty WAL comes and goes with every connection, so it is ignored.
+    """
+    # ponytail: file stats rely on the filesystem's mtime resolution (ns on ext4/xfs/APFS).
+    # Keep a version counter in the database if this ever runs on coarser storage.
+    wal = _stat(f"{config.APP_DB_PATH}-wal")
+    state = (office_ids, _stat(config.APP_DB_PATH), wal if wal and wal[1] else None, _signature(_sources()[1]))
+    return hashlib.sha256(repr(state).encode()).hexdigest()[:32]
 
 
 def meter_data_mode(meter, daily):

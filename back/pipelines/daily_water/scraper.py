@@ -1,29 +1,19 @@
 """Arisu monthly queries, keyed by registered customer number; resumable date ranges."""
 from __future__ import annotations
 
-import argparse
 import math
 import re
-import sys
 import time
 from datetime import date, timedelta
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[3]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-
-from back.pipelines.common import RUNTIME, collection_lock, collector_meters, customer_number, merge_csv, today, write_json
+from back.pipelines.common import RUNTIME, collector_meters, customer_number, merge_csv, today, write_json
 from back.scripts.billing_etl.i121_crawler.auth import (BASE, session_from_env, _looks_like_login_page,
     LoginError, CustomerAccessError, ensure_customer_access)
 from back.scripts.billing_etl.i121_crawler.fetch import shift_month
 
 DAILY_DIR = RUNTIME / "daily" / "water"
 FIELDS = ["고객번호", "역명", "납기", "사용일", "검침일자", "지침값", "일사용량(톤)", "납기별누적사용량(톤)"]
-
-
-def login():
-    return session_from_env(ROOT / ".env")
 
 
 def _reading_date(value):
@@ -148,7 +138,7 @@ def scrape_range(start: date, end: date, *, meters=None, session=None, out_dir=N
     if not meters:
         raise ValueError("No active Arisu customers enabled for daily collection")
     out_dir = Path(out_dir or DAILY_DIR)
-    session = session or login()
+    session = session or session_from_env()
     days = [start + timedelta(days=n) for n in range((end - start).days + 1)]
     rows_by_day = {str(day): [] for day in days}
     failures = []
@@ -180,24 +170,3 @@ def scrape_range(start: date, end: date, *, meters=None, session=None, out_dir=N
         write_json(out_dir / f"{day}.status.json", report)
         reports.append(report)
     return reports
-
-
-def scrape(target_date=None, **kwargs):
-    target_date = target_date or today() - timedelta(days=1)
-    report = scrape_range(target_date, target_date, **kwargs)[0]
-    if report["errors"]:
-        raise RuntimeError("Some Arisu requests failed; successful observations were preserved")
-    path = Path(kwargs.get("out_dir") or DAILY_DIR) / f"{target_date}.csv"
-    return path if path.exists() else None
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("start", nargs="?", type=date.fromisoformat)
-    parser.add_argument("end", nargs="?", type=date.fromisoformat)
-    args = parser.parse_args()
-    start = args.start or today() - timedelta(days=1)
-    with collection_lock(RUNTIME):
-        reports = scrape_range(start, args.end or start)
-    print(reports)
-    raise SystemExit(1 if any(r["errors"] for r in reports) else 0)

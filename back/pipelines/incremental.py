@@ -79,12 +79,12 @@ def collect_meter(meter, *, progress=None, session=None):
     except (KeyError, ValueError):
         return _result("failed", "고객번호 형식을 확인해 주세요.")
     notify = progress or (lambda message: None)
-    notify("기존 자료와 누락 기간을 확인하고 있습니다.")
+    notify("빠진 기간을 확인하는 중입니다.")
     owns_session = session is None
     with collection_lock(config.DATA_DIR):
         try:
             if owns_session:
-                session = collection_session(config.ROOT / ".env")
+                session = collection_session()
         except ConfigurationError:
             return _result("configuration_required", "서버에 아리수 아이디와 비밀번호를 설정해야 합니다.")
         except LoginError:
@@ -97,7 +97,7 @@ def collect_meter(meter, *, progress=None, session=None):
         except Exception as exc:
             # Exception text can contain a remote URL or credentials. Log types only.
             logger.error("Unexpected incremental collection failure (%s)", type(exc).__name__)
-            return _result("failed", "수집 자료를 반영하지 못했습니다. 저장된 기존 자료는 보존됩니다.")
+            return _result("failed", "수집한 자료를 저장하지 못했습니다. 기존 자료는 그대로입니다.")
         finally:
             if owns_session:
                 session.close()
@@ -130,7 +130,7 @@ def _collect(meter, session, notify):
     else:
         months = water_months(observations, end, checked) if daily_enabled else []
     for month in months:
-        notify(f"일일 사용량 {month} 누락 자료를 조회하고 있습니다.")
+        notify(f"{month} 일일 사용량을 조회하는 중입니다.")
         try:
             issues = []
             rows = fetch_month(session, meter, month, issues=issues)
@@ -157,7 +157,7 @@ def _collect(meter, session, notify):
         except Exception as exc:
             logger.warning("Water query %s failed (%s)", month, type(exc).__name__)
             errors.append(f"{month} 일일 사용량 조회에 실패했습니다")
-    notify("청구 내역의 누락 기간과 최근 납기를 조회하고 있습니다.")
+    notify("청구서를 조회하는 중입니다.")
     bills = []
     bill_end = today().strftime('%Y-%m')
     retries = state.get('bill_retry_windows', [])
@@ -172,7 +172,7 @@ def _collect(meter, session, notify):
                 if json.loads(r['payload']).get('detail_available')}
         failures = []
         for bill_start, window_end in windows:
-            notify(f"청구 내역 {bill_start} ~ {window_end} 누락 자료를 조회하고 있습니다.")
+            notify(f"{bill_start}~{window_end} 청구서를 조회하는 중입니다.")
             report = collect_bills(start_ym=bill_start, end_ym=window_end, mkeys=[cid], session=session,
                 customer_names={cid: meter.get('metadata', {}).get('arisu_customer_name', '')},
                 known_details=known_details, cache_dir=runtime / "raw/billing_i121/i121_cache",
@@ -200,16 +200,13 @@ def _collect(meter, session, notify):
     except Exception as exc:
         logger.warning("Bill collection failed (%s)", type(exc).__name__)
         errors.append("청구 내역 조회에 실패했습니다")
-    notify("확인된 자료를 저장하고 화면에 반영하고 있습니다.")
-    if bills or fresh:
+    notify("수집한 자료를 저장하는 중입니다.")
+    if bills:
         try:
             with db.connect() as conn:
-                if bills:
-                    upsert_bill_summaries(conn, bills)
-                    address = next((r["address"] for r in reversed(bills) if r.get("address")), "")
-                    conn.execute("UPDATE meters SET address=CASE WHEN address='' THEN ? ELSE address END WHERE id=?", (address, meter["id"]))
-                if fresh:
-                    conn.execute("UPDATE meters SET daily_enabled=1,updated_at=? WHERE id=?", (db.now(), meter["id"]))
+                upsert_bill_summaries(conn, bills)
+                address = next((r["address"] for r in reversed(bills) if r.get("address")), "")
+                conn.execute("UPDATE meters SET address=CASE WHEN address='' THEN ? ELSE address END WHERE id=?", (address, meter["id"]))
         except Exception as exc:
             logger.error("Collected data database write failed (%s)", type(exc).__name__)
             failed_windows = list(windows)
@@ -234,10 +231,10 @@ def _collect(meter, session, notify):
     valid = bool(fresh or bills)
     status = "partial" if errors and valid else "failed" if errors else "success" if valid else "empty"
     if errors:
-        message = "; ".join(dict.fromkeys(errors)) + ". 성공한 자료는 보존하며 다음 조회에서 재시도합니다."
+        message = "; ".join(dict.fromkeys(errors)) + ". 수집된 자료는 저장했고, 나머지는 다음 수집 때 다시 시도합니다."
     elif valid:
         message = (f"일일 사용량 {len(fresh)}건, 청구 내역 {len(bills)}건을 확인했습니다." if daily_enabled
                    else f"청구 전용 계량기: 청구 내역 {len(bills)}건을 확인했습니다.")
     else:
-        message = "조회 기간에 자료가 없거나 이 계정에 조회 권한이 없습니다. 고객번호가 없다고 단정할 수 없습니다."
+        message = "조회된 자료가 없습니다. 이 기간에 자료가 없거나, 이 계정으로 볼 수 없는 고객번호일 수 있습니다."
     return _result(status, message, len(fresh), len(bills), bool(observations), valid)

@@ -7,6 +7,10 @@ export function kdate(iso) {
 }
 export const won = (n) => Number.isFinite(n) ? Math.round(n).toLocaleString("ko-KR") : "—";
 export const ton = (n) => Number.isFinite(n) ? n.toLocaleString("ko-KR", { maximumFractionDigits: 1 }) : "—";
+export const signedPct = (pct, missing = "—") => pct == null ? missing : `${pct > 0 ? "+" : ""}${pct}%`;
+export const SEVERITY_TONE = { 정상: "ok", 주의: "warn", 경고: "alert" };
+// 차트 계열색: 사용량은 공사 청색, 승하차는 청록, 요금은 황동색.
+export const CHART_COLORS = { usage: "#17288b", riders: "#0e7c7b", fee: "#8a6d3b" };
 const baseName = (name) => String(name || "").replace(/\d+$/, "");
 const sorted = (series = []) => [...series].sort((a, b) => a.date.localeCompare(b.date));
 
@@ -59,7 +63,6 @@ export function buildStations(bills = {}, meta = {}, daily = {}, risk = {}, mete
   return [...groups.values()].map((station) => ({
     ...station,
     lines: station.lines.sort((a, b) => Number(a.line) - Number(b.line) || a.고객번호.localeCompare(b.고객번호)),
-    tier: station.lines.some((l) => l.risk) ? "full74" : station.lines.some((l) => l.daily || l.ridership) ? "cut3" : "billonly",
   })).sort((a, b) => a.역명.localeCompare(b.역명, "ko"));
 }
 export function latestDate(stations) {
@@ -67,7 +70,7 @@ export function latestDate(stations) {
 }
 export const detailHref = (meterId) => `#/detail?meter=${encodeURIComponent(meterId)}`;
 export const billNoticeNumber = (bill) => String(bill.notice_number || bill.고지번호 || "").trim();
-export const billLabel = (bill) => `${bill.gubun || "정기분"}${billNoticeNumber(bill) ? ` · 고지번호 ${billNoticeNumber(bill)}` : ""}`;
+export const billLabel = (bill) => `${bill.gubun || "정기분"}${billNoticeNumber(bill) ? ` (고지번호 ${billNoticeNumber(bill)})` : ""}`;
 export function billUsage(bill) {
   if (bill.사용량 != null) return bill.사용량;
   const detailed = !bill.summary_only && (Object.hasOwn(bill, "사용량") || bill.detail_available || bill.source === "i121_public_detail");

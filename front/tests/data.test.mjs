@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { billGroundwater, billLabel, billNoticeNumber, billUsage, billWindow, buildRisk, buildStations, chartRange, detailHref, latestDate } from "../src/pages/Detail/data.js";
+import { billGroundwater, billLabel, billNoticeNumber, billUsage, billWindow, buildRisk, buildStations, chartRange, detailHref, latestDate, signedPct } from "../src/pages/Detail/data.js";
 import { buildDashboard, buildMapGroups } from "../src/pages/Dashboard/dashboardData.js";
-import { deleteMeter, exportUrl, getMeters, request, restoreMeter, saveCollectionSettings, setCsrfToken, startCollection } from "../src/api.js";
+import { deleteMeter, exportUrl, getData, getMeters, request, restoreMeter, saveCollectionSettings, setCsrfToken, startCollection } from "../src/api.js";
 import { collectionNeedsRefresh, collectionTime, isCollectionActive, meterCollectionState } from "../src/collection.js";
 import { statisticsPeriod } from "../src/pages/statisticsData.js";
 
@@ -80,7 +80,7 @@ test("same-month ad hoc notices have distinct labels while legacy bills keep the
     { id: "meter:2026-09:수시분:00001", ym: "2026-09", gubun: "수시분", notice_number: "00001" },
     { id: "meter:2026-09:수시분:00002", ym: "2026-09", gubun: "수시분", 고지번호: "00002" },
   ];
-  assert.deepEqual(bills.map(billLabel), ["수시분 · 고지번호 00001", "수시분 · 고지번호 00002"]);
+  assert.deepEqual(bills.map(billLabel), ["수시분 (고지번호 00001)", "수시분 (고지번호 00002)"]);
   assert.equal(billNoticeNumber(bills[0]), "00001");
   assert.equal(billLabel({ gubun: "수시분", notice_number: "" }), "수시분");
   assert.equal(billLabel({}), "정기분");
@@ -144,6 +144,18 @@ test("API mutations use the in-memory CSRF token and cookie session expires on 4
     await assert.rejects(request("/data"), /로그인 필요/);
     assert.equal(expired, true);
   } finally { globalThis.fetch = originalFetch; globalThis.window = originalWindow; setCsrfToken(); }
+});
+
+test("data polling sends the held version and an unchanged 204 leaves current data alone", async () => {
+  const originalFetch = globalThis.fetch;
+  const paths = [];
+  try {
+    globalThis.fetch = async (path) => { paths.push(path); return { ok: true, status: 204 }; };
+    assert.equal(await getData("a&b"), null);
+    await getData();
+    assert.deepEqual(paths, ["/api/data?version=a%26b", "/api/data"]);
+  } finally { globalThis.fetch = originalFetch; }
+  assert.deepEqual([12, -3, 0, null].map((pct) => signedPct(pct, "–")), ["+12%", "-3%", "0%", "–"]);
 });
 
 test("successful API responses with invalid JSON report a routing error", async () => {
