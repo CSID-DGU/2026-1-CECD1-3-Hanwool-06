@@ -264,14 +264,17 @@ class PipelineTest(unittest.TestCase):
         cut_short = good + '"20260502","1호선","강'.encode()                                    # the transfer stopped mid-row
         next_month = good + '"20260601","1호선","강동","1","2","20260604"\n'.encode()          # rows of another month mixed in
         not_a_count = good + '"20260502","1호선","강동","x","2","20260504"\n'.encode()
-        for body in (b'', b'  \n', good.replace(b'20260501', b'20260401'), b'<html>login</html>', cut_short, next_month, not_a_count):
+        cut_in_number = good + '"20260502","1호선","강동","10","2'.encode()                     # stopped inside a quoted count
+        no_such_day = good + '"20260532","1호선","강동","1","2","20260604"\n'.encode()
+        for body in (b'', b'  \n', good.replace(b'20260501', b'20260401'), b'<html>login</html>', cut_short, next_month, not_a_count,
+                     cut_in_number, no_such_day):
             session.post.return_value = Mock(content=body, raise_for_status=Mock())
             with self.assertRaises(ValueError):
                 fetch()
             self.assertEqual(list(self.path.glob('CARD_SUBWAY_MONTH_*')), [])
         # an empty or damaged file left by an earlier run is fetched again instead of being trusted
         session.post.return_value = Mock(content=good, raise_for_status=Mock())
-        for left_behind in (b'', cut_short, next_month):
+        for left_behind in (b'', cut_short, next_month, cut_in_number, no_such_day):
             (self.path / 'CARD_SUBWAY_MONTH_202605.csv').write_bytes(left_behind)
             self.assertEqual(fetch().read_bytes(), good)
         session.post.reset_mock()

@@ -14,7 +14,7 @@ class StaticPageTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             dist = Path(tmp) / 'dist'
             (dist / 'assets').mkdir(parents=True)
-            (dist / 'index.html').write_text('<head><script type="module" crossorigin src="/assets/index-a.js"></script>\n'
+            (dist / 'index.html').write_text('<!doctype html>\n<head><script type="module" crossorigin src="/assets/index-a.js"></script>\n'
                                              '<link rel="stylesheet" crossorigin href="/assets/index-b.css"></head><body></body>')
             (dist / 'assets' / 'index-a.js').write_text('const logo="/assets/logo-c.svg";const s="</script>";')
             (dist / 'assets' / 'index-b.css').write_text('.a{background:url(/assets/logo-c.svg)}')
@@ -44,7 +44,8 @@ class StaticPageTest(unittest.TestCase):
             self.assertEqual(static_page.build(out, payload | {'version': 'v2'}, dist), out)
             # ...including one that merely mentions the data variable, like the screen's own source file.
             for name, text in (('notes.html', '<p>회의 자료</p>'),
-                               ('api.js', 'const packed = typeof window !== "undefined" ? window.__STATIC_DATA_GZ__ : undefined;')):
+                               ('api.js', 'const packed = typeof window !== "undefined" ? window.__STATIC_DATA_GZ__ : undefined;'),
+                               ('copy_of_static_page.py', Path(static_page.__file__).read_text(encoding='utf-8'))):   # it quotes the opening itself
                 other = Path(tmp) / name
                 other.write_text(text)
                 with self.assertRaises(ValueError):

@@ -32,10 +32,13 @@ def build(destination: Path, payload: dict | None = None, dist: Path = DIST) -> 
         raise ValueError('화면이 공개되는 폴더(front/dist, front/public)에는 저장할 수 없습니다. 다른 폴더를 고르세요.')
     if destination.is_dir():
         raise ValueError('폴더가 아니라 저장할 파일 이름을 적어 주세요.')
-    if destination.exists():   # 앞서 만든 저장본만 새로 덮어쓴다
+    if destination.exists():
+        # 앞서 만든 저장본만 새로 덮어쓴다: HTML 문서로 시작하고 첫머리에 자료 스크립트가 있어야 한다.
+        # 그 문자열을 인용만 하는 다른 파일(화면 소스, 이 모듈)은 저장본이 아니다.
         with destination.open('rb') as existing:
-            if OPENING.encode() not in existing.read(4096):   # 변수 이름만 나오는 다른 파일(화면 소스 등)은 저장본이 아니다
-                raise ValueError('같은 이름의 다른 파일이 이미 있습니다. 덮어쓰지 않으니 다른 이름을 쓰세요.')
+            head = existing.read(4096)
+        if not (head.lstrip().lower().startswith(b'<!doctype html') and OPENING.encode() in head):
+            raise ValueError('같은 이름의 다른 파일이 이미 있습니다. 덮어쓰지 않으니 다른 이름을 쓰세요.')
     html = index.read_text(encoding='utf-8')
     assets = {path.name: path for path in (dist / 'assets').iterdir()}
     public = {path.name: path for path in dist.iterdir() if path.is_file() and path.name != 'index.html'}   # front/public 의 파일

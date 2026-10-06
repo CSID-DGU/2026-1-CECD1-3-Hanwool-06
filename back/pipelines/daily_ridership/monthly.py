@@ -41,25 +41,27 @@ def _rows(content: bytes):
         text = content.decode("utf-8-sig")
     except UnicodeDecodeError:
         text = content.decode("cp949")  # 2022년 이전 파일
-    return csv.DictReader(text.splitlines())
+    return csv.DictReader(text.splitlines(), strict=True)   # 따옴표가 닫히지 않은 채 끊긴 행을 값으로 읽지 않는다
 
 
 def _parse(content: bytes) -> dict:
     """{YYYYMMDD: ((역, 호선)별 합계, 역별 합계)}. 승차와 하차를 더한다. 읽을 수 없는 행이 하나라도 있으면 ValueError."""
     days = defaultdict(lambda: (defaultdict(int), defaultdict(int)))
-    for row in _rows(content):
-        try:   # 전송이 끊겨 잘린 행은 칸이 모자라 여기서 걸린다
-            ymd, ride, alight = str(row["사용일자"]), int(row["승차총승객수"]), int(row["하차총승객수"])
-            station, line = _normalize_station(row["역명"]), _parse_line(row["노선명"])
-        except (KeyError, TypeError, ValueError):
-            raise ValueError("Damaged row in monthly ridership file") from None
-        if not re.fullmatch(r"\d{8}", ymd):
-            raise ValueError("Unexpected date in monthly ridership file")
-        if ride < 0 or alight < 0:
-            raise ValueError("Negative ridership count")
-        byline, bystn = days[ymd]
-        byline[(station, line)] += ride + alight
-        bystn[station] += ride + alight
+    try:
+        for row in _rows(content):
+            ymd = str(row["사용일자"])
+            if not re.fullmatch(r"\d{8}", ymd):
+                raise ValueError("Unexpected date in monthly ridership file")
+            date(int(ymd[:4]), int(ymd[4:6]), int(ymd[6:]))   # 달력에 없는 날짜(20260532)는 여기서 걸린다
+            ride, alight = int(row["승차총승객수"]), int(row["하차총승객수"])   # 잘려서 칸이 모자란 행은 여기서 걸린다
+            if ride < 0 or alight < 0:
+                raise ValueError("Negative ridership count")
+            station = _normalize_station(row["역명"])
+            byline, bystn = days[ymd]
+            byline[(station, _parse_line(row["노선명"]))] += ride + alight
+            bystn[station] += ride + alight
+    except (csv.Error, KeyError, TypeError) as error:
+        raise ValueError("Damaged monthly ridership file") from error
     return days
 
 
