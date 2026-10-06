@@ -26,6 +26,7 @@ export default function DetailPage({ data, hash, collection }) {
   const viewStation = { ...station, 주소: line.주소, 용도: line.용도, 사용자명: station.역명 };
   const stale = Boolean(line.risk && data.status?.reference_date && line.risk.기준일 < data.status.reference_date);
   const billingOnly = line.dataMode === "billing_only";
+  const fileBase = [station.역명, line.line && `${line.line}호선`, line.고객번호].filter(Boolean).join("_");   // 서버가 붙이는 이름과 같다
   return <main className="dt-page">
     <div className="dt-picker" aria-label="조회할 계량기 선택">
       <label className="form-field">영업사업소<select value={officeId} onChange={(e) => {
@@ -53,8 +54,8 @@ export default function DetailPage({ data, hash, collection }) {
       <Bill key={line.meterId} station={viewStation} line={line} />
     </Card>
     <div className="export-toolbar"><span>이 계량기 자료 내려받기</span>
-      {!billingOnly && <FileLink href={exportUrl({ kind: "usage", meter_id: line.meterId })} filename={`${line.고객번호}_사용량.xlsx`}>일일 사용량 Excel</FileLink>}
-      <FileLink href={exportUrl({ kind: "bills", meter_id: line.meterId })} filename={`${line.고객번호}_청구내역.xlsx`}>청구내역 Excel</FileLink></div>
+      {!billingOnly && <FileLink href={exportUrl({ kind: "usage", meter_id: line.meterId })} filename={`${fileBase}_사용량.xlsx`}>일일 사용량 Excel</FileLink>}
+      <FileLink href={exportUrl({ kind: "bills", meter_id: line.meterId })} filename={`${fileBase}_청구내역.xlsx`}>청구내역 Excel</FileLink></div>
   </main>;
 }
 

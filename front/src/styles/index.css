@@ -188,6 +188,7 @@ button.line-badge[aria-pressed="false"] { background: var(--paper); box-shadow: 
 
 .workspace { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 24px; align-items: start; }
 .map-panel, .side-panel { min-width: 0; }
+.side-panel { display: flex; flex-direction: column; gap: 24px; }
 .zoom-controls { display: flex; align-items: center; gap: 4px; }
 .zoom-controls button { min-width: 28px; height: 28px; padding: 0 8px; border: 1px solid var(--rule); border-radius: var(--radius); background: var(--paper); font-size: 13px; }
 .zoom-controls span { min-width: 40px; color: var(--sub); font-size: 12px; text-align: center; font-variant-numeric: tabular-nums; }
@@ -206,26 +207,24 @@ button.line-badge[aria-pressed="false"] { background: var(--paper); box-shadow: 
 .map-legend { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 14px; margin-top: 10px; }
 .map-legend .risk-badge { font-size: 12px; font-weight: 400; }
 .map-legend > span:last-child { margin-left: auto; color: var(--mute); font-size: 12px; }
-.map-selection { margin-top: 12px; border: 1px solid var(--rule); border-radius: var(--radius); }
-.map-selection > div { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: var(--ground); }
-.map-selection > a { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 12px; border-top: 1px solid var(--rule-soft); font-size: 13px; }
-.map-selection > a:hover { background: #fafbfc; }
-.map-selection small { display: block; color: var(--mute); }
 .map-unplaced { margin-top: 12px; color: var(--sub); font-size: 13px; }
 .map-unplaced summary { width: fit-content; color: var(--brand); cursor: pointer; }
 .map-unplaced ul { display: flex; flex-wrap: wrap; gap: 4px 16px; max-height: 170px; margin: 8px 0 0; padding: 0; overflow-y: auto; list-style: none; }
 .map-source { margin: 8px 0 0; color: var(--mute); font-size: 12px; }
-.priority-list { display: flex; flex-direction: column; max-height: 600px; overflow-y: auto; }
-.station-row { display: flex; align-items: center; gap: 10px; padding: 10px 4px; border-bottom: 1px solid var(--rule-soft); }
+.priority-list { display: flex; flex-direction: column; max-height: 600px; overflow-y: auto; border: 1px solid var(--rule); border-radius: var(--radius); }
+.priority-list > :last-child { border-bottom: 0; }
+/* 칸이 둘이면(우선 확인 대상 + 고른 역) 둘을 합쳐 노선도 높이에 맞춘다. */
+.side-block:not(:only-child) .priority-list { max-height: 262px; }
+.station-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--rule-soft); }
 .station-row:hover { background: #fafbfc; }
 .station-row-name { flex: 1; min-width: 0; }
 .station-row-name strong { display: block; font-weight: 600; }
 .station-row-name small { display: block; overflow: hidden; color: var(--mute); text-overflow: ellipsis; white-space: nowrap; }
 .station-row-side { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
 .station-row-side b { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.side-panel > .text-button { margin-top: 12px; }
+.side-block > .text-button { margin-top: 12px; }
 /* 청구 전용 화면에서 노선도 옆에 뜨는 역 정보 */
-.station-card { display: block; padding: 10px 4px; border-bottom: 1px solid var(--rule-soft); font-size: 13px; }
+.station-card { display: block; padding: 10px 12px; border-bottom: 1px solid var(--rule-soft); font-size: 13px; }
 .station-card:hover { background: #fafbfc; }
 .station-card strong { display: block; font-weight: 600; }
 .station-card small { display: block; color: var(--mute); }

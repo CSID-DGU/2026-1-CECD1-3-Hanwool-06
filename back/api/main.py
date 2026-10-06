@@ -564,10 +564,20 @@ def export_rows(user, kind, start=None, end=None, office_id=None, line=None, met
     return rows
 
 
+def export_filename(kind, meter=None, start=None, end=None):
+    """계량기 하나면 역이름_호선_고객번호_종류, 여럿이면 종류(_기간). 같은 역·호선에 계량기가 여럿 있어 고객번호로 구분한다."""
+    label = '사용량' if kind == 'usage' else '청구내역'
+    parts = [meter['station_name'], meter['line'] and f"{meter['line']}호선", meter['customer_number'], label] if meter else [label, start, end]
+    return re.sub(r'[\\/:*?"<>|\x00-\x1f]', '_', '_'.join(p for p in parts if p)) + '.xlsx'
+
+
 @app.get('/api/export.xlsx')
 def export(kind: str = 'usage', start: str | None = None, end: str | None = None, office_id: str | None = None, line: str | None = None, meter_id: str | None = None, dl: str | None = None, user=Depends(auth.current_user)):
     rows = export_rows(user, kind, start, end, office_id, line, meter_id)
-    return mark_download(Response(documents.export_xlsx(rows), media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', headers={'Content-Disposition': f'attachment; filename=water-{kind}.xlsx'}), dl)
+    with db.connect() as c:
+        meter = get_meter(c, meter_id, user) if meter_id else None
+    name = quote(export_filename(kind, meter, start, end), safe='')
+    return mark_download(Response(documents.export_xlsx(rows), media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', headers={'Content-Disposition': f"attachment; filename=water-{kind}.xlsx; filename*=UTF-8''{name}"}), dl)
 
 
 @app.get('/api/stats')

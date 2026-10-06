@@ -3,33 +3,35 @@ import { buildMapGroups, riskMeta } from "../dashboardData.js";
 import { detailHref, ton, won } from "../../Detail/data.js";
 import { EmptyNote, SectionTitle } from "../../Detail/ui.jsx";
 import RiskBadge from "./RiskBadge.jsx";
+import StationRow from "./StationRow.jsx";
 
-const lineNames = (meter) => meter.lines.filter(Boolean).map((line) => `${line}호선`).join(", ");
-
-// 청구 전용 화면: 노선도에서 고른 역의 계량기와 최근 청구 내역을 노선도 오른쪽에 보여 준다.
-function BillingSelection({ station, onClose }) {
-  return <aside className="side-panel" aria-label="선택한 역의 계량기" aria-live="polite">
+// 노선도에서 고른 역의 계량기. 일일 관제는 위험도를, 청구 전용은 최근 청구 내역을 보여 준다.
+function StationSelection({ station, billingOnly, onClose }) {
+  return <section className="side-block" aria-label="선택한 역의 계량기" aria-live="polite">
     <SectionTitle as="h2" right={station && <button type="button" className="text-button" onClick={onClose}>닫기</button>}>
       {station ? <>{station.name} <span className="count">계량기 {station.meters.length}개</span></> : "선택한 역"}
     </SectionTitle>
-    {station ? <div className="priority-list">
-      {station.meters.map((meter) => <a key={meter.id} href={detailHref(meter.id)} className="station-card">
-        <strong>{lineNames(meter)} {meter.displayName}</strong>
-        <small>고객번호 {meter.customerNo}</small>
-        <dl>
-          <div><dt>영업사업소</dt><dd>{meter.office}</dd></div>
-          <div><dt>최근 청구</dt><dd>{meter.latestBillMonth || "청구서 없음"}</dd></div>
-          {meter.latestBillMonth && <>
-            <div><dt>사용량</dt><dd>{meter.latestBillUsage == null ? "—" : `${ton(meter.latestBillUsage)} 톤`}</dd></div>
-            <div><dt>납부금액</dt><dd>{meter.latestBillAmount == null ? "—" : `${won(meter.latestBillAmount)} 원`}</dd></div>
-          </>}
-        </dl>
-      </a>)}
-    </div> : <EmptyNote>노선도에서 역을 누르면 여기에 나옵니다.</EmptyNote>}
-  </aside>;
+    <div className="priority-list">
+      {!station ? <EmptyNote>노선도에서 역을 누르면 여기에 나옵니다.</EmptyNote>
+        : !billingOnly ? station.meters.map((meter) => <StationRow key={meter.id} station={meter} byMeter />)
+        : station.meters.map((meter) => <a key={meter.id} href={detailHref(meter.id)} className="station-card">
+          <strong>{meter.lines.filter(Boolean).map((line) => `${line}호선`).join(", ")} {meter.displayName}</strong>
+          <small>고객번호 {meter.customerNo}</small>
+          <dl>
+            <div><dt>영업사업소</dt><dd>{meter.office}</dd></div>
+            <div><dt>최근 청구</dt><dd>{meter.latestBillMonth || "청구서 없음"}</dd></div>
+            {meter.latestBillMonth && <>
+              <div><dt>사용량</dt><dd>{meter.latestBillUsage == null ? "—" : `${ton(meter.latestBillUsage)} 톤`}</dd></div>
+              <div><dt>납부금액</dt><dd>{meter.latestBillAmount == null ? "—" : `${won(meter.latestBillAmount)} 원`}</dd></div>
+            </>}
+          </dl>
+        </a>)}
+    </div>
+  </section>;
 }
 
-export default function MapPanel({ stationMap, locations, billingOnly = false }) {
+// children: 오른쪽 칸에서 고른 역 위에 놓을 내용(일일 관제의 우선 확인 대상).
+export default function MapPanel({ stationMap, locations, billingOnly = false, children }) {
   const [zoom, setZoom] = useState(1);
   const [selected, setSelected] = useState(null);
   const viewport = useRef(null);
@@ -71,15 +73,14 @@ export default function MapPanel({ stationMap, locations, billingOnly = false })
     </div>
     <div className="map-legend">
       {(billingOnly ? ["billing_only"] : ["alert", "warn", "ok", "unknown", "analysis_pending", "pending"]).map((risk) => <RiskBadge key={risk} risk={risk} />)}
-      <span>{billingOnly ? "역을 누르면 그 역의 계량기와 최근 청구 내역을 볼 수 있습니다." : "역을 누르면 그 역의 계량기가 아래에 나옵니다."}</span>
+      <span>{billingOnly ? "역을 누르면 그 역의 계량기와 최근 청구 내역을 볼 수 있습니다." : "역을 누르면 그 역의 계량기를 볼 수 있습니다."}</span>
     </div>
-    {active && !billingOnly && <div className="map-selection" aria-live="polite">
-      <div><strong>{active.name}</strong><button type="button" className="text-button" onClick={() => setSelected(null)}>닫기</button></div>
-      {active.meters.map((meter) => <a key={meter.id} href={detailHref(meter.id)}><span>{lineNames(meter)} {meter.displayName}<small>{meter.customerNo}</small></span><RiskBadge risk={meter.risk} /></a>)}
-    </div>}
     {unplaced.length > 0 && <details className="map-unplaced"><summary>노선도에 위치가 없는 역 {unplaced.length}개</summary><ul>{unplaced.map((station) => <li key={station.id}><button type="button" className="text-button" onClick={() => setSelected(station.id)}>{station.name} ({station.meters.length}개)</button></li>)}</ul></details>}
     <p className="map-source">노선도 출처: 서울교통공사</p>
   </section>
-  {billingOnly && <BillingSelection station={active} onClose={() => setSelected(null)} />}
+  <aside className="side-panel">
+    {children}
+    <StationSelection station={active} billingOnly={billingOnly} onClose={() => setSelected(null)} />
+  </aside>
   </>;
 }

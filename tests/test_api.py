@@ -8,6 +8,7 @@ import unittest
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import Mock, patch
+from urllib.parse import unquote
 from fastapi.testclient import TestClient
 from openpyxl import load_workbook
 from pypdf import PdfReader
@@ -113,6 +114,13 @@ class ApplicationTest(unittest.TestCase):
         self.assertEqual(xlsx.cookies.get('dl_abc123'), '1')
         self.assertNotIn('HttpOnly', xlsx.headers['set-cookie'])
         self.assertNotIn('set-cookie', manager.get('/api/export.xlsx?kind=bills&dl=bad%20token').headers)
+        # 내려받는 파일 이름: 계량기 하나면 역이름_호선_고객번호_종류, 여럿이면 종류(_기간)
+        saved_as = lambda query: unquote(manager.get('/api/export.xlsx?' + query).headers['content-disposition'].split("filename*=UTF-8''")[1])
+        self.assertEqual(saved_as('kind=bills&meter_id=000000001'), '동부역_2호선_000000001_청구내역.xlsx')
+        self.assertEqual(saved_as('kind=usage&meter_id=000000001'), '동부역_2호선_000000001_사용량.xlsx')
+        self.assertEqual(saved_as('kind=bills'), '청구내역.xlsx')
+        self.assertEqual(saved_as('kind=usage&start=2026-08-01&end=2026-08-31'), '사용량_2026-08-01_2026-08-31.xlsx')
+        self.assertEqual(main.export_filename('bills', {'station_name': '가/나:역', 'line': None, 'customer_number': '1'}), '가_나_역_1_청구내역.xlsx')
         stats = manager.get('/api/stats').json()['rows']
         self.assertEqual(stats[0]['billed_won'],123000)
         self.assertEqual(stats[0]['usage_ton'],20)

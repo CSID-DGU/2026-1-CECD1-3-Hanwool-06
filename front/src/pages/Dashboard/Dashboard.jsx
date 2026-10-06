@@ -45,15 +45,16 @@ export default function Dashboard({ data, collection }) {
     </div>
     <FilterPanel {...{ searchTerm, setSearchTerm, resetFilters, selectedLine, selectedOffice, selectedRisk, setSelectedLine, setSelectedOffice, setSelectedRisk, offices, billingOnly }} stations={viewStations} />
     <section className="workspace">
-      <MapPanel stationMap={new Map(filteredStations.map((s) => [s.id, s]))} locations={data.locations || {}} billingOnly={billingOnly} />
-      {!billingOnly && <aside className="side-panel" aria-label="우선 확인할 계량기">
-        <SectionTitle as="h2">우선 확인 대상 <span className="count">{alerts.length + warnings.length}개</span></SectionTitle>
-        <div className="priority-list">
-          {[...alerts, ...warnings].map((station) => <StationRow station={station} key={station.id} />)}
-          {!alerts.length && !warnings.length && <EmptyNote>경고·주의 계량기가 없습니다.</EmptyNote>}
-        </div>
-        {unknowns.length > 0 && <button type="button" className="text-button" onClick={() => setSelectedRisk("unknown")}>자료 확인이 필요한 계량기 {unknowns.length}개 보기</button>}
-      </aside>}
+      <MapPanel stationMap={new Map(filteredStations.map((s) => [s.id, s]))} locations={data.locations || {}} billingOnly={billingOnly}>
+        {!billingOnly && <section className="side-block" aria-label="우선 확인할 계량기">
+          <SectionTitle as="h2">우선 확인 대상 <span className="count">{alerts.length + warnings.length}개</span></SectionTitle>
+          <div className="priority-list">
+            {[...alerts, ...warnings].map((station) => <StationRow station={station} key={station.id} />)}
+            {!alerts.length && !warnings.length && <EmptyNote>경고·주의 계량기가 없습니다.</EmptyNote>}
+          </div>
+          {unknowns.length > 0 && <button type="button" className="text-button" onClick={() => setSelectedRisk("unknown")}>자료 확인이 필요한 계량기 {unknowns.length}개 보기</button>}
+        </section>}
+      </MapPanel>
     </section>
     <StationTable stations={filteredStations} billingOnly={billingOnly} actions={<>
       <span className="export-note">사업소·호선 조건으로 내려받기</span>
