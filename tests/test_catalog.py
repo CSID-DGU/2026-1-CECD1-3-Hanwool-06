@@ -170,6 +170,19 @@ class CatalogCheck(unittest.TestCase):
         self.assertEqual(book.active["C2"].value, 0)
         self.assertIsNone(book.active["C3"].value)
 
+    def test_excel_export_does_not_rescan_the_sheet_per_row(self):
+        """한 줄 쓸 때마다 시트 전체를 다시 훑으면 줄 수의 제곱으로 느려진다(청구 5만 줄에 십몇 분)."""
+        from openpyxl import load_workbook
+        from openpyxl.worksheet.worksheet import Worksheet
+        scans = []
+        counting = lambda prop: property(lambda sheet: scans.append(1) or prop.fget(sheet))
+        with patch.object(Worksheet, "max_row", counting(Worksheet.max_row)), \
+                patch.object(Worksheet, "max_column", counting(Worksheet.max_column)):
+            content = documents.export_xlsx([{"고객번호": f"{i:09d}", "이름": "=1+1", "값": i} for i in range(300)])
+        self.assertLess(len(scans), 30)
+        sheet = load_workbook(BytesIO(content)).active
+        self.assertEqual((sheet.max_row, sheet["B301"].data_type, sheet["B301"].value, sheet["C301"].value), (301, "s", "=1+1", 299))
+
     def test_summary_refresh_preserves_details(self):
         rows = [{"mkey": "1", "napgi_compact": date, "gubun": "정기분", "bugwa_amount_won": 900,
                  "total_usage_ton": 12, "sunap_status": "완납"} for date in ("20260430", "20260531")]

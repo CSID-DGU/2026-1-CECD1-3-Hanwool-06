@@ -119,6 +119,7 @@ def bill_pdf(meter: dict, bill: dict) -> bytes:
 def export_xlsx(rows: list[dict]) -> bytes:
     """Export server-authorized rows. External strings remain text, never formulas."""
     from openpyxl import Workbook
+    from openpyxl.cell import Cell
     from openpyxl.styles import Font, PatternFill
 
     workbook = Workbook()
@@ -126,12 +127,16 @@ def export_xlsx(rows: list[dict]) -> bytes:
     sheet.title = "조회내역"
     columns = list(dict.fromkeys(key for row in rows for key in row))
     sheet.append(columns or ["조회 결과 없음"])
+
+    def text(value):   # "="로 시작해도 수식이 아니라 글자로 남긴다
+        cell = Cell(sheet, value=value)
+        cell.data_type = "s"
+        return cell
+
+    # 글자 칸은 넣기 전에 만들어 둔다. 넣은 뒤 sheet[sheet.max_row]로 찾으면 줄마다 시트 전체를 다시 훑는다.
     for row in rows:
-        sheet.append([json.dumps(row[key], ensure_ascii=False) if isinstance(row.get(key), (dict, list))
-                      else row.get(key) for key in columns])
-        for cell in sheet[sheet.max_row]:
-            if isinstance(cell.value, str):
-                cell.data_type = "s"
+        values = (json.dumps(row[key], ensure_ascii=False) if isinstance(row.get(key), (dict, list)) else row.get(key) for key in columns)
+        sheet.append([text(value) if isinstance(value, str) else value for value in values])
     # Column labels can also originate from an uploaded source.
     for cell in sheet[1]:
         cell.data_type = "s"
