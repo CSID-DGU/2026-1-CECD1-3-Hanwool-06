@@ -261,15 +261,19 @@ class PipelineTest(unittest.TestCase):
         good = ('"사용일자","노선명","역명","승차총승객수","하차총승객수","등록일자"\n"20260501","1호선","강동","10","20","20260504"\n').encode('utf-8-sig')
         session = Mock()
         fetch = lambda: monthly.download_month('2026-05', '7', session, raw_dir=self.path)
-        for body in (b'', b'  \n', good.replace(b'20260501', b'20260401'), b'<html>login</html>'):
+        cut_short = good + '"20260502","1호선","강'.encode()                                    # the transfer stopped mid-row
+        next_month = good + '"20260601","1호선","강동","1","2","20260604"\n'.encode()          # rows of another month mixed in
+        not_a_count = good + '"20260502","1호선","강동","x","2","20260504"\n'.encode()
+        for body in (b'', b'  \n', good.replace(b'20260501', b'20260401'), b'<html>login</html>', cut_short, next_month, not_a_count):
             session.post.return_value = Mock(content=body, raise_for_status=Mock())
             with self.assertRaises(ValueError):
                 fetch()
             self.assertEqual(list(self.path.glob('CARD_SUBWAY_MONTH_*')), [])
-        # an empty file left by an earlier run is fetched again instead of being trusted
-        (self.path / 'CARD_SUBWAY_MONTH_202605.csv').write_bytes(b'')
+        # an empty or damaged file left by an earlier run is fetched again instead of being trusted
         session.post.return_value = Mock(content=good, raise_for_status=Mock())
-        self.assertEqual(fetch().read_bytes(), good)
+        for left_behind in (b'', cut_short, next_month):
+            (self.path / 'CARD_SUBWAY_MONTH_202605.csv').write_bytes(left_behind)
+            self.assertEqual(fetch().read_bytes(), good)
         session.post.reset_mock()
         self.assertEqual(fetch().read_bytes(), good)   # a good file is reused without another request
         session.post.assert_not_called()

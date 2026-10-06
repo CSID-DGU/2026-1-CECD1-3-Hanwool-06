@@ -168,8 +168,9 @@ def password(body: Password, request: Request, user=Depends(auth.current_user)):
     with db.connect() as c:
         tries = c.execute('SELECT count(*) FROM login_attempts WHERE identity=? AND attempted_at>=?', (identity, now-900)).fetchone()[0]
         row = c.execute('SELECT password_hash FROM users WHERE id=?', (user['id'],)).fetchone()
+    too_many = HTTPException(429, '현재 비밀번호를 여러 번 틀렸습니다. 15분 후 다시 시도하세요.')
     if tries >= 5:
-        raise HTTPException(429, '현재 비밀번호를 여러 번 틀렸습니다. 15분 후 다시 시도하세요.')
+        raise too_many
     # Hashing shares the login limit and never runs while holding the database writer lock.
     if not LOGIN_HASH_SLOTS.acquire(blocking=False):
         raise HTTPException(429, '요청이 많습니다. 잠시 후 다시 시도하세요.')
@@ -182,7 +183,11 @@ def password(body: Password, request: Request, user=Depends(auth.current_user)):
     saved = False
     with db.connect() as c:
         c.execute('BEGIN IMMEDIATE')
-        if not valid:
+        # Requests that were already hashing when the limit filled up get no extra try, not even a correct one.
+        limited = c.execute('SELECT count(*) FROM login_attempts WHERE identity=? AND attempted_at>=?', (identity, now-900)).fetchone()[0] >= 5
+        if limited:
+            pass
+        elif not valid:
             c.execute('INSERT INTO login_attempts(attempted_at,identity) VALUES(?,?)', (now, identity))
         elif not same:
             # Save only if the verified password and this session are still the current ones: a reset
@@ -194,6 +199,8 @@ def password(body: Password, request: Request, user=Depends(auth.current_user)):
                 c.execute('DELETE FROM login_attempts WHERE identity=?', (identity,))
                 c.execute('DELETE FROM sessions WHERE user_id=? AND token_hash<>?', (user['id'], token))
                 db.audit(c, user['id'], 'password_change', user['id'])
+    if limited:
+        raise too_many
     if not valid:
         raise HTTPException(400, '현재 비밀번호를 확인하세요.')
     if same:
@@ -547,6 +554,13 @@ def mark_download(response: Response, token: str | None, state: str = '1') -> Re
     if token and re.fullmatch(r'[A-Za-z0-9_-]{1,32}', token):
         response.set_cookie(f'dl_{token}', state, max_age=60, path='/', samesite='lax', secure=config.COOKIE_SECURE, httponly=False)
     return response
+
+
+@app.exception_handler(Exception)
+async def unhandled_error(request: Request, exc: Exception):
+    # The server still logs the error after this. A screen waiting for a file learns of the failure
+    # at once instead of at its three-minute timeout; the cause is not sent to the browser.
+    return mark_download(JSONResponse({'detail': '서버에서 요청을 처리하지 못했습니다.'}, status_code=500), request.query_params.get('dl'), '0')
 
 
 @app.get('/api/bills/{bill_id}/pdf')

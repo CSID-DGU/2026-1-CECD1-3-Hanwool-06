@@ -14,7 +14,7 @@ from pathlib import Path
 from . import catalog, config
 
 DIST = config.ROOT / 'front/dist'
-MARK = 'window.__STATIC_DATA_GZ__'   # 화면이 자료를 읽는 자리이자, 앞서 만든 저장본을 알아보는 표시
+OPENING = '<script>window.__STATIC_DATA_GZ__="'   # 저장본에만 있는 첫머리: 화면이 자료를 읽는 자리이자 앞서 만든 저장본을 알아보는 표시
 
 
 def current_payload() -> dict:
@@ -34,7 +34,7 @@ def build(destination: Path, payload: dict | None = None, dist: Path = DIST) -> 
         raise ValueError('폴더가 아니라 저장할 파일 이름을 적어 주세요.')
     if destination.exists():   # 앞서 만든 저장본만 새로 덮어쓴다
         with destination.open('rb') as existing:
-            if MARK.encode() not in existing.read(4096):
+            if OPENING.encode() not in existing.read(4096):   # 변수 이름만 나오는 다른 파일(화면 소스 등)은 저장본이 아니다
                 raise ValueError('같은 이름의 다른 파일이 이미 있습니다. 덮어쓰지 않으니 다른 이름을 쓰세요.')
     html = index.read_text(encoding='utf-8')
     assets = {path.name: path for path in (dist / 'assets').iterdir()}
@@ -58,7 +58,7 @@ def build(destination: Path, payload: dict | None = None, dist: Path = DIST) -> 
                   lambda m: '<style>' + inline(m.group(1), 'style') + '</style>', html)
     data = payload if payload is not None else current_payload()
     packed = base64.b64encode(gzip.compress(json.dumps(data, ensure_ascii=False, separators=(',', ':')).encode(), 9)).decode()
-    html = html.replace('<script type="module">', f'<script>{MARK}="{packed}";</script>\n    <script type="module">', 1)
+    html = html.replace('<script type="module">', f'{OPENING}{packed}";</script>\n    <script type="module">', 1)
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(html, encoding='utf-8')
     destination.chmod(0o600)

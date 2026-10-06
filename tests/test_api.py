@@ -191,7 +191,7 @@ class ApplicationTest(unittest.TestCase):
         fresh.close()
 
     def test_password_change_attempts_are_limited_like_login(self):
-        self.login()
+        user = self.login()
         wrong = {'current_password': 'NotTheCurrentPass!1', 'new_password': 'AnotherNewPass!234'}
         for _ in range(5):
             self.assertEqual(self.client.post('/api/auth/password', json=wrong).status_code, 400)
@@ -207,8 +207,32 @@ class ApplicationTest(unittest.TestCase):
         finally:
             for _ in range(4):
                 main.LOGIN_HASH_SLOTS.release()
+        # Requests that were already verifying when the limit filled up are refused too, even a correct one.
+        identity = main.auth.token_hash(f"password:{user['id']}")
+        verify = main.auth.verify_password
+
+        def limit_fills_meanwhile(password, hashed):
+            with db.connect() as c:
+                c.executemany('INSERT INTO login_attempts(attempted_at,identity) VALUES(?,?)', [(main.time.time(), identity)] * 5)
+            return verify(password, hashed)
+
+        with patch.object(main.auth, 'verify_password', side_effect=limit_fills_meanwhile):
+            late = self.client.post('/api/auth/password', json={'current_password': self.admin_password, 'new_password': 'AnotherNewPass!234'})
+        self.assertEqual(late.status_code, 429, late.text)
+        with db.connect() as c:
+            self.assertEqual(c.execute('SELECT count(*) FROM login_attempts WHERE identity=?', (identity,)).fetchone()[0], 5)
+            c.execute('DELETE FROM login_attempts')
         changed = self.client.post('/api/auth/password', json={'current_password': self.admin_password, 'new_password': 'AnotherNewPass!234'})
         self.assertEqual(changed.status_code, 200, changed.text)
+
+    def test_file_request_that_crashes_is_marked_as_failed(self):
+        quiet = TestClient(main.app, base_url='http://localhost', raise_server_exceptions=False)
+        self.login(quiet)
+        with patch.object(main.documents, 'export_xlsx', side_effect=RuntimeError('disk full')):
+            crashed = quiet.get('/api/export.xlsx?kind=bills&dl=boom1')
+        self.assertEqual((crashed.status_code, crashed.cookies.get('dl_boom1')), (500, '0'))
+        self.assertNotIn('disk full', crashed.text)
+        quiet.close()
 
     def test_page_policy_and_request_body_limit(self):
         self.assertIn("default-src 'self'", self.client.get('/').headers['content-security-policy'])

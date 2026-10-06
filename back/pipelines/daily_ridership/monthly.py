@@ -26,7 +26,6 @@ from back.scripts.billing_etl.i121_crawler.fetch import shift_month
 LIST_URL = "https://data.seoul.go.kr/dataList/OA-12914/F/1/datasetView.do"
 DOWNLOAD_URL = "https://datafile.seoul.go.kr/bigfile/iot/inf/nio_download.do?useCache=false"
 RAW_DIR = RUNTIME / "raw" / "ridership_monthly"
-COLUMNS = {"사용일자", "노선명", "역명", "승차총승객수", "하차총승객수"}
 
 
 def published_months(session) -> dict[str, str]:
@@ -45,10 +44,32 @@ def _rows(content: bytes):
     return csv.DictReader(text.splitlines())
 
 
+def _parse(content: bytes) -> dict:
+    """{YYYYMMDD: ((역, 호선)별 합계, 역별 합계)}. 승차와 하차를 더한다. 읽을 수 없는 행이 하나라도 있으면 ValueError."""
+    days = defaultdict(lambda: (defaultdict(int), defaultdict(int)))
+    for row in _rows(content):
+        try:   # 전송이 끊겨 잘린 행은 칸이 모자라 여기서 걸린다
+            ymd, ride, alight = str(row["사용일자"]), int(row["승차총승객수"]), int(row["하차총승객수"])
+            station, line = _normalize_station(row["역명"]), _parse_line(row["노선명"])
+        except (KeyError, TypeError, ValueError):
+            raise ValueError("Damaged row in monthly ridership file") from None
+        if not re.fullmatch(r"\d{8}", ymd):
+            raise ValueError("Unexpected date in monthly ridership file")
+        if ride < 0 or alight < 0:
+            raise ValueError("Negative ridership count")
+        byline, bystn = days[ymd]
+        byline[(station, line)] += ride + alight
+        bystn[station] += ride + alight
+    return days
+
+
 def _is_month(content: bytes, month: str) -> bool:
-    """그 달의 승하차 파일이 맞는가. 빈 응답이나 다른 달 파일은 아니다."""
-    first = next(_rows(content), None)
-    return bool(first) and COLUMNS <= set(first) and str(first["사용일자"]).startswith(month.replace("-", ""))
+    """그 달의 온전한 승하차 파일인가: 모든 행이 읽히고 모든 날짜가 그 달이다. 빈 응답·잘린 파일·다른 달이 섞인 파일은 아니다."""
+    try:
+        days = _parse(content)
+    except ValueError:
+        return False
+    return bool(days) and all(day.startswith(month.replace("-", "")) for day in days)
 
 
 def download_month(month: str, seq: str, session, raw_dir=None) -> Path:
@@ -62,25 +83,13 @@ def download_month(month: str, seq: str, session, raw_dir=None) -> Path:
     if response.content.lstrip()[:1] == b"<":
         raise ValueError("Monthly ridership download returned a page instead of a CSV file")
     if not _is_month(response.content, month):
-        raise ValueError("Monthly ridership download is empty or is not the requested month")
+        raise ValueError("Monthly ridership download is empty, damaged, or not the requested month")
     atomic_bytes(path, response.content)
     return path
 
 
 def read_month(path) -> dict:
-    """{YYYYMMDD: ((역, 호선)별 합계, 역별 합계)}. 승차와 하차를 더한다."""
-    days = defaultdict(lambda: (defaultdict(int), defaultdict(int)))
-    for row in _rows(Path(path).read_bytes()):
-        if not re.fullmatch(r"\d{8}", row["사용일자"]):
-            raise ValueError("Unexpected date in monthly ridership file")
-        ride, alight = int(row["승차총승객수"]), int(row["하차총승객수"])
-        if ride < 0 or alight < 0:
-            raise ValueError("Negative ridership count")
-        station = _normalize_station(row["역명"])
-        byline, bystn = days[row["사용일자"]]
-        byline[(station, _parse_line(row["노선명"]))] += ride + alight
-        bystn[station] += ride + alight
-    return days
+    return _parse(Path(path).read_bytes())
 
 
 def import_month(path, *, meters=None, out_dir=None) -> list[str]:
