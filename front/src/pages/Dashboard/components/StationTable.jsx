@@ -31,7 +31,7 @@ export default function StationTable({ stations, billingOnly = false, actions })
                 <td>{station.office}</td>
                 {!billingOnly && <>
                   <td>
-                    <RiskBadge risk={station.risk} />
+                    <RiskBadge risk={station.risk} label={station.riskLabel} />
                     {station.riskDetail && <small>{station.riskDetail}</small>}
                   </td>
                   <td className="num">{ton(station.usage)} 톤</td>

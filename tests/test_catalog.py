@@ -53,7 +53,8 @@ class CatalogCheck(unittest.TestCase):
                   "000000002": {"usage": [{"date": "2026-06-01", "value": 90}], "ridership": []}}
         (version / "daily.json").write_text(json.dumps(series))
         (version / "risk.json").write_text("{}")
-        (version.parent.parent / "manifest.json").write_text('{"published":true,"directory":"versions/check"}')
+        (version.parent.parent / "manifest.json").write_text(
+            '{"published":true,"directory":"versions/check","withheld":[{"customer_number":"000000002"}]}')
         with db.connect() as conn:
             conn.execute("UPDATE meters SET purpose='직원용' WHERE id='000000001'")
             conn.execute("INSERT INTO stations(id,name) VALUES('나역','나역')")
@@ -73,6 +74,9 @@ class CatalogCheck(unittest.TestCase):
         self.assertIsNone(catalog.payload([])["status"]["reference_date"])
         self.assertEqual(catalog.payload([])["status"]["counts"], {"daily": 0, "billing_only": 0, "pending": 0})
         self.assertEqual(catalog.payload(["나사업소"])["bills"]["000000002"]["bills"], [])
+        # a meter the model left out for short history is marked so the screen can say why it has no risk yet
+        everything = catalog.payload(None)["stations"]
+        self.assertEqual((everything["000000001"]["history_short"], everything["000000002"]["history_short"]), (False, True))
 
     def test_merge_details_and_risk(self):
         path = self.root / "details.csv"

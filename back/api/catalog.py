@@ -300,6 +300,8 @@ def payload(allowed_office_ids=None):
         offices = [{"id": r["id"], "name": r["name"]} for r in conn.execute("SELECT * FROM offices ORDER BY name")
                    if allowed_office_ids is None or r["id"] in allowed_office_ids]
     all_daily, all_risk = data_sources()
+    # Meters the last model run left out because their training/validation history was too short.
+    history_short = {w.get("customer_number") for w in _json(config.DATA_DIR / "snapshot" / "manifest.json").get("withheld", [])}
     bills, stations, daily, risk, locations = {}, {}, {}, {}, {}
     counts = dict.fromkeys(("daily", "billing_only", "pending"), 0)
     for m in meters:
@@ -312,7 +314,8 @@ def payload(allowed_office_ids=None):
         stations[mid] = {"역명": m["display_name"], "호선": int(m["line"]) if str(m["line"]).isdigit() else None,
                          "영업사업소": m["office_name"], "office_id": m["office_id"], "station_id": m["station_id"],
                          "provider": m["provider"], "customer_number": cid, "active": bool(m["active"]),
-                         "daily_enabled": bool(m["daily_enabled"]), "purpose": m["purpose"], "data_mode": m["data_mode"]}
+                         "daily_enabled": bool(m["daily_enabled"]), "purpose": m["purpose"], "data_mode": m["data_mode"],
+                         "history_short": cid in history_short}
         if m["provider"] == "arisu" and m['daily_enabled']:
             if cid in all_daily:
                 daily[mid] = all_daily[cid]

@@ -16,12 +16,15 @@ export function buildDashboard(data) {
   const stations = buildStations(data.bills, data.stations, data.daily, data.risk, data.meters).flatMap((s) => s.lines.map((l) => {
     const reference = data.status?.reference_date || data.status?.latest_risk;
     const stale = Boolean(l.risk && reference && l.risk.기준일 < String(reference).slice(0, 10));
+    const waiting = l.dataMode === "daily" && !l.risk && !l.riskError;
     return {
       id: l.meterId, stationId: s.id, name: s.역명, displayName: l.display_name || l.고객번호,
       dataMode: l.dataMode, latestBillMonth: l.bills.at(-1)?.ym || "",
       office: l.영업사업소, officeId: String(l.office_id ?? ""), lines: [String(l.line)],
       risk: l.dataMode === "billing_only" ? "billing_only" : l.dataMode === "pending" ? "pending" : l.riskError || stale ? "unknown" : SEVERITY_TONE[l.risk?.severity] || "analysis_pending",
       riskDetail: l.dataMode !== "daily" ? "" : l.riskError ? "최근 관측값 오류" : stale ? "분석일이 오래됨" : "",
+      // 분석 대기인 까닭을 아는 경우에는 이름에 함께 적는다.
+      riskLabel: waiting && l.historyShort ? "분석 대기(학습 데이터 부족)" : "",
       customerNo: l.고객번호, usage: l.daily?.at(-1)?.value ?? l.risk?.actual ?? null,
       delta: l.risk?.pct ?? null,
       dailyDate: l.daily?.at(-1)?.date || "", riskDate: l.risk?.기준일 || "", dailyEnabled: l.daily_enabled,

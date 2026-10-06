@@ -47,7 +47,7 @@ export default function DetailPage({ data, hash, collection }) {
       {line.dataMode === "daily"
         ? <DailyPanel key={line.meterId} usage={line.daily} ridership={line.ridership} latest={latest} />
         : <Card title="일일 사용량"><EmptyNote>아직 수집된 일일 사용량이 없습니다. 첫 자료가 들어오면 여기에 표시됩니다.</EmptyNote></Card>}
-      {line.dataMode === "daily" && (line.risk ? <RiskPanel key={line.meterId} line={line} /> : <Card title="위험도"><EmptyNote>아직 위험도 분석 결과가 없습니다.</EmptyNote></Card>)}
+      {line.dataMode === "daily" && (line.risk ? <RiskPanel key={line.meterId} line={line} /> : <Card title="위험도"><EmptyNote>{line.historyShort ? "분석 대기(학습 데이터 부족): 모델이 배울 과거 자료가 90일에 못 미쳐 아직 판정하지 않습니다." : "아직 위험도 분석 결과가 없습니다."}</EmptyNote></Card>)}
     </div>}
     <Card title="청구서">
       <Bill key={line.meterId} station={viewStation} line={line} />

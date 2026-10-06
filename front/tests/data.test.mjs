@@ -74,6 +74,12 @@ test("billing-only, first collection and analysis waiting stay outside risk clas
   assert.equal(byId.billing.risk, "billing_only");
   assert.equal(byId.pending.risk, "pending");
   assert.equal(byId.analysis.risk, "analysis_pending");
+  assert.equal(byId.analysis.riskLabel, "");   // 까닭을 모르면 이름에 덧붙이지 않는다
+  const short = buildDashboard({ meters, stations: { analysis: { history_short: true }, zero: { history_short: true } },
+    daily: { zero: { usage: [{ date: "2026-06-01", value: 0 }] }, analysis: { usage: [{ date: "2026-06-01", value: 5 }] } },
+    risk: { zero: [{ ...oldRisk[0], actual: 0, severity: "정상" }] } }).stations;
+  assert.equal(short.find((s) => s.id === "analysis").riskLabel, "분석 대기(학습 데이터 부족)");
+  assert.equal(short.find((s) => s.id === "zero").riskLabel, "");   // 판정이 있는 계량기에는 붙지 않는다
   assert.equal(byId.zero.dataMode, "daily");
   assert.equal(byId.zero.risk, "ok");
   assert.equal(stations.filter((s) => ["warn", "alert"].includes(s.risk)).length, 0);

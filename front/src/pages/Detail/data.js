@@ -78,6 +78,7 @@ export function buildStations(bills = {}, meta = {}, daily = {}, risk = {}, mete
       daily: usage.length ? sorted(usage) : null,
       ridership: d.ridership?.length ? sorted(d.ridership) : null,
       risk: dataMode === "daily" ? buildRisk(risk[key]) : null,
+      historyShort: Boolean(m.history_short),   // 학습 이력이 모자라 모델이 판정하지 않은 계량기
       riskError: dataMode === "daily" && Boolean(sorted(risk[key]).at(-1)?.err),
     };
     if (!groups.has(stationId)) groups.set(stationId, { id: stationId, 역명: name, 사용자명: name, lines: [] });
