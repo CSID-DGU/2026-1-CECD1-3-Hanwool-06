@@ -9,7 +9,19 @@ import { LoginPage, PasswordPage } from "./components/AuthPanels.jsx";
 import AppHeader from "./pages/Dashboard/components/AppHeader.jsx";
 import { getData, getHealth, getMe, isStatic, logout, setCsrfToken } from "./api.js";
 import logo from "./assets/seoulmetro.svg";
+import { version } from "../package.json";
 import "./pages/Detail/detail.css";
+
+function SiteFooter() {
+  return (
+    <footer className="site-footer">
+      <div>
+        <p>문의 <a href="mailto:ai.hanwool.22@gmail.com">ai.hanwool.22@gmail.com</a></p>
+        <p className="footer-legal"><span>Copyright © 2026 동국대학교 종합설계 한울. All rights reserved.</span><span>v{version}</span></p>
+      </div>
+    </footer>
+  );
+}
 
 export default function App() {
   const [hash, setHash] = useState(window.location.hash);
@@ -77,7 +89,7 @@ export default function App() {
     catch (e) { setError(e.message); }
   }
   if (session === undefined) return <main className="auth-page"><p role="status">확인 중…</p></main>;
-  if (!session) return <LoginPage setupRequired={setupRequired} onLogin={establish} error={error} onRetry={checkSession} />;
+  if (!session) return <><LoginPage setupRequired={setupRequired} onLogin={establish} error={error} onRetry={checkSession} /><SiteFooter /></>;
 
   return <>
     <a className="skip-link" href="#main-content" onClick={(e) => { e.preventDefault(); document.getElementById("main-content")?.focus(); }}>본문으로 이동</a>
@@ -92,6 +104,7 @@ export default function App() {
       : hash.startsWith("#/detail") ? <DetailPage data={data} hash={hash} collection={collection} />
       : <Dashboard data={data} collection={collection} />}
     </div>
+    <SiteFooter />
     {summaryOpen && !session.must_change_password && <SummaryPopup date={data?.status?.reference_date} onClose={() => setSummaryOpen(false)} />}
   </>;
 }

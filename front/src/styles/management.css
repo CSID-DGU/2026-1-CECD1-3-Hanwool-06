@@ -1,7 +1,7 @@
 /* 로그인·내 계정, 계량기·사용자 관리, 정보 업데이트(수집), 통계 */
 
 /* 로그인 · 내 계정 */
-.auth-page { display: grid; place-items: center; min-height: 100vh; padding: 32px 16px; background: var(--ground); }
+.auth-page { display: grid; flex: 1; place-items: center; padding: 32px 16px; background: var(--ground); }
 .auth-card { width: 100%; max-width: 380px; padding: 32px; border: 1px solid var(--rule); border-radius: var(--radius); background: var(--paper); }
 .auth-logo { display: block; width: 150px; height: auto; margin-bottom: 20px; }
 .auth-card h1 { margin-bottom: 20px; font-size: 20px; }
