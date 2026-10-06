@@ -110,10 +110,16 @@ class ApplicationTest(unittest.TestCase):
         rows = list(load_workbook(io.BytesIO(xlsx.content)).active.values)
         self.assertEqual(len(rows), 2)
         self.assertEqual(rows[1][1], '000000001')
+        self.assertEqual([name for name in rows[0] if name.startswith('_') or name == '집계사용량_톤'], [])   # 내부 집계값은 파일에 없다
         # the download marker comes back as a readable cookie so the screen can close its "preparing" notice
         self.assertEqual(xlsx.cookies.get('dl_abc123'), '1')
         self.assertNotIn('HttpOnly', xlsx.headers['set-cookie'])
         self.assertNotIn('set-cookie', manager.get('/api/export.xlsx?kind=bills&dl=bad%20token').headers)
+        # a file that could not be made is marked too, so the screen stops waiting and says so
+        failed = manager.get('/api/export.xlsx?kind=bills&meter_id=missing&dl=fail1')
+        self.assertEqual((failed.status_code, failed.cookies.get('dl_fail1')), (404, '0'))
+        self.assertNotIn('HttpOnly', failed.headers['set-cookie'])
+        self.assertNotIn('set-cookie', manager.get('/api/export.xlsx?kind=bills&meter_id=missing').headers)
         # 내려받는 파일 이름: 계량기 하나면 역이름_호선_고객번호_종류, 여럿이면 종류(_기간)
         saved_as = lambda query: unquote(manager.get('/api/export.xlsx?' + query).headers['content-disposition'].split("filename*=UTF-8''")[1])
         self.assertEqual(saved_as('kind=bills&meter_id=000000001'), '동부역_2호선_000000001_청구내역.xlsx')
@@ -123,6 +129,7 @@ class ApplicationTest(unittest.TestCase):
         self.assertEqual(main.export_filename('bills', {'station_name': '가/나:역', 'line': None, 'customer_number': '1'}), '가_나_역_1_청구내역.xlsx')
         stats = manager.get('/api/stats').json()['rows']
         self.assertEqual(stats[0]['billed_won'],123000)
+        self.assertEqual(stats[0]['billed_usage_ton'], 32)   # 청구 사용량 합계. Excel에서 뺀 집계 열이 통계에서도 빠지면 안 된다
         self.assertEqual(stats[0]['usage_ton'],20)
         with patch.object(mailer,'send_mail',return_value={'sent':True,'to':['staff@example.com']}) as send:
             response = manager.post('/api/alert',json={'meter_id':'000000001','date':'2026-08-31'})
@@ -162,6 +169,46 @@ class ApplicationTest(unittest.TestCase):
         self.assertEqual(other_ip.post('/api/auth/login', json={'email': 'chief@example.com', 'password': 'ChangedPass!234'}).status_code, 200)
         other_ip.close()
         old_session.close()
+
+    def test_password_change_cannot_undo_a_reset_made_meanwhile(self):
+        """현재 비밀번호를 확인한 뒤 저장하기 전에 관리자가 재설정하면, 먼저 시작한 변경 요청은 버려야 한다."""
+        self.login()
+        verify = main.auth.verify_password
+
+        def verified_then_reset(password, hashed):
+            ok = verify(password, hashed)
+            with db.connect() as c:   # 그 사이 관리자가 비밀번호를 바꾸고 세션을 끊는다
+                c.execute('UPDATE users SET password_hash=?,must_change_password=1', (main.auth.hash_password('AdminResetPass!234'),))
+                c.execute('DELETE FROM sessions')
+            return ok
+
+        with patch.object(main.auth, 'verify_password', side_effect=verified_then_reset):
+            late = self.client.post('/api/auth/password', json={'current_password': self.admin_password, 'new_password': 'TakenOverPass!234'})
+        self.assertEqual(late.status_code, 401, late.text)
+        fresh = TestClient(main.app, base_url='http://localhost', client=('192.0.2.3', 50000))
+        self.assertEqual(fresh.post('/api/auth/login', json={'email': 'chief@example.com', 'password': 'TakenOverPass!234'}).status_code, 401)
+        self.assertEqual(fresh.post('/api/auth/login', json={'email': 'chief@example.com', 'password': 'AdminResetPass!234'}).status_code, 200)
+        fresh.close()
+
+    def test_password_change_attempts_are_limited_like_login(self):
+        self.login()
+        wrong = {'current_password': 'NotTheCurrentPass!1', 'new_password': 'AnotherNewPass!234'}
+        for _ in range(5):
+            self.assertEqual(self.client.post('/api/auth/password', json=wrong).status_code, 400)
+        with patch.object(main.auth, 'verify_password') as verify:   # 막힌 뒤에는 비싼 검증을 하지 않는다
+            blocked = self.client.post('/api/auth/password', json={'current_password': self.admin_password, 'new_password': 'AnotherNewPass!234'})
+        self.assertEqual((blocked.status_code, verify.call_count), (429, 0))
+        with db.connect() as c:
+            c.execute('DELETE FROM login_attempts')
+        for _ in range(4):
+            self.assertTrue(main.LOGIN_HASH_SLOTS.acquire(blocking=False))
+        try:   # 로그인과 같은 해시 연산 한도를 쓴다
+            self.assertEqual(self.client.post('/api/auth/password', json=wrong).status_code, 429)
+        finally:
+            for _ in range(4):
+                main.LOGIN_HASH_SLOTS.release()
+        changed = self.client.post('/api/auth/password', json={'current_password': self.admin_password, 'new_password': 'AnotherNewPass!234'})
+        self.assertEqual(changed.status_code, 200, changed.text)
 
     def test_page_policy_and_request_body_limit(self):
         self.assertIn("default-src 'self'", self.client.get('/').headers['content-security-policy'])

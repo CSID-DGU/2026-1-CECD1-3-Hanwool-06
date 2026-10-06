@@ -140,9 +140,35 @@ class IncrementalTest(unittest.TestCase):
 
     def test_unregistered_daily_customer_still_saves_public_bills(self):
         session = Mock(arisu_customer_numbers=frozenset({'000000002'}))
+        daily_enabled = lambda: sqlite_value("SELECT daily_enabled FROM meters WHERE id='meter'")
+
+        def sqlite_value(sql):
+            with db.connect() as conn:
+                return conn.execute(sql).fetchone()[0]
+
+        def collect(with_session):
+            with patch.object(inc, 'fetch_month', return_value=[]) as water, patch.object(inc, 'collect_bills', return_value={'rows': [self.bill()], 'errors': []}):
+                return inc.collect_meter(self.meter, session=with_session), water
+
+        # A customer list that arrives empty is a failed lookup, never proof that every meter left the account.
+        for _ in range(3):
+            result, water = collect(Mock(arisu_customer_numbers=frozenset()))
+            self.assertEqual((result['status'], daily_enabled()), ('partial', 1))
+            self.assertIn('고객 목록을 받지 못', result['message'])
+            water.assert_not_called()
+        # One list without this customer could be a partial response: warn once, keep the setting.
+        result, water = collect(session)
+        self.assertEqual((result['status'], daily_enabled()), ('partial', 1))
+        self.assertIn('다음 수집에서도 없으면', result['message'])
+        water.assert_not_called()
+        # Seeing the customer again clears that warning, so the next miss counts as the first one.
+        result, water = collect(Mock(arisu_customer_numbers=frozenset({'000000001'})))
+        self.assertEqual((result['status'], daily_enabled()), ('success', 1))
+        water.assert_called()
+        self.assertEqual((collect(session)[0]['status'], daily_enabled()), ('partial', 1))
         with patch.object(inc, 'fetch_month') as water, patch.object(inc, 'collect_bills', return_value={'rows': [self.bill()], 'errors': []}):
             result = inc.collect_meter(self.meter, session=session)
-        # an unregistered customer leaves daily monitoring instead of failing on every run; bills keep coming
+        # missing from two lists in a row: the customer leaves daily monitoring instead of failing on every run; bills keep coming
         self.assertEqual(result['status'], 'success')
         self.assertIn('일일 관제에서 제외', result['message'])
         self.assertEqual(result['bill_rows'], 1)

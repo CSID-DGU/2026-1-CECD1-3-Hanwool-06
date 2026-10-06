@@ -33,6 +33,20 @@ class StaticPageTest(unittest.TestCase):
             self.assertEqual(out.stat().st_mode & 0o077, 0)
             with self.assertRaises(FileNotFoundError):
                 static_page.build(Path(tmp) / 'out2.html', payload, Path(tmp) / 'missing')
+            # The copy holds every office's data: never write it where the server (or the next build) publishes files.
+            login_page = (dist / 'index.html').read_text()
+            for public in (dist / 'index.html', dist / 'saved' / 'page.html', Path(tmp) / 'public' / 'page.html',
+                           Path(tmp) / 'out' / '..' / 'dist' / 'index.html'):
+                with self.assertRaises(ValueError):
+                    static_page.build(public, payload, dist)
+            self.assertEqual((dist / 'index.html').read_text(), login_page)
+            # An earlier copy may be replaced; any other existing file is left alone.
+            self.assertEqual(static_page.build(out, payload | {'version': 'v2'}, dist), out)
+            other = Path(tmp) / 'notes.html'
+            other.write_text('<p>회의 자료</p>')
+            with self.assertRaises(ValueError):
+                static_page.build(other, payload, dist)
+            self.assertEqual(other.read_text(), '<p>회의 자료</p>')
 
 
 if __name__ == '__main__':

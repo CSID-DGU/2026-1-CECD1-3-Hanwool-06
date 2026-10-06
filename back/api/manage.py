@@ -28,7 +28,7 @@ def main():
     if args.command == 'export-static':
         try:
             target = static_page.build(args.destination.expanduser().resolve())
-        except FileNotFoundError as error:
+        except (FileNotFoundError, ValueError) as error:
             parser.error(str(error))
         print(f'저장했습니다: {target} ({target.stat().st_size / 1e6:.1f}MB). 자료가 통째로 들어 있으니 공개된 곳에 두지 마세요.')
         return

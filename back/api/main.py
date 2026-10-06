@@ -58,6 +58,8 @@ async def private_headers(request, call_next):
         response = JSONResponse({'detail': '요청 본문이 너무 큽니다.'}, status_code=413)
     else:
         response = await call_next(request)
+    if response.status_code >= 400:
+        mark_download(response, request.query_params.get('dl'), '0')   # the screen waiting for this file can stop
     response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers['Referrer-Policy'] = 'same-origin'
     response.headers['X-Frame-Options'] = 'SAMEORIGIN'
@@ -160,15 +162,44 @@ class Password(StrictModel):
 
 @app.post('/api/auth/password')
 def password(body: Password, request: Request, user=Depends(auth.current_user)):
+    token = auth.token_hash(request.cookies.get(auth.COOKIE, ''))
+    identity = auth.token_hash(f"password:{user['id']}")
+    now = time.time()
     with db.connect() as c:
+        tries = c.execute('SELECT count(*) FROM login_attempts WHERE identity=? AND attempted_at>=?', (identity, now-900)).fetchone()[0]
         row = c.execute('SELECT password_hash FROM users WHERE id=?', (user['id'],)).fetchone()
-        if not auth.verify_password(body.current_password, row['password_hash']):
-            raise HTTPException(400, '현재 비밀번호를 확인하세요.')
-        if body.current_password == body.new_password:
-            raise HTTPException(400, '기존 비밀번호와 다른 값을 입력하세요.')
-        c.execute('UPDATE users SET password_hash=?,must_change_password=0 WHERE id=?', (auth.hash_password(body.new_password), user['id']))
-        c.execute('DELETE FROM sessions WHERE user_id=? AND token_hash<>?', (user['id'], auth.token_hash(request.cookies.get(auth.COOKIE, ''))))
-        db.audit(c, user['id'], 'password_change', user['id'])
+    if tries >= 5:
+        raise HTTPException(429, '현재 비밀번호를 여러 번 틀렸습니다. 15분 후 다시 시도하세요.')
+    # Hashing shares the login limit and never runs while holding the database writer lock.
+    if not LOGIN_HASH_SLOTS.acquire(blocking=False):
+        raise HTTPException(429, '요청이 많습니다. 잠시 후 다시 시도하세요.')
+    try:
+        valid = auth.verify_password(body.current_password, row['password_hash'])
+        same = body.current_password == body.new_password
+        new_hash = auth.hash_password(body.new_password) if valid and not same else None
+    finally:
+        LOGIN_HASH_SLOTS.release()
+    saved = False
+    with db.connect() as c:
+        c.execute('BEGIN IMMEDIATE')
+        if not valid:
+            c.execute('INSERT INTO login_attempts(attempted_at,identity) VALUES(?,?)', (now, identity))
+        elif not same:
+            # Save only if the verified password and this session are still the current ones: a reset
+            # made while this request was hashing must win over it.
+            alive = c.execute('SELECT 1 FROM sessions WHERE token_hash=? AND user_id=? AND expires_at>?', (token, user['id'], now)).fetchone()
+            saved = bool(alive) and c.execute('UPDATE users SET password_hash=?,must_change_password=0 WHERE id=? AND active=1 AND password_hash=?',
+                                              (new_hash, user['id'], row['password_hash'])).rowcount == 1
+            if saved:
+                c.execute('DELETE FROM login_attempts WHERE identity=?', (identity,))
+                c.execute('DELETE FROM sessions WHERE user_id=? AND token_hash<>?', (user['id'], token))
+                db.audit(c, user['id'], 'password_change', user['id'])
+    if not valid:
+        raise HTTPException(400, '현재 비밀번호를 확인하세요.')
+    if same:
+        raise HTTPException(400, '기존 비밀번호와 다른 값을 입력하세요.')
+    if not saved:
+        raise HTTPException(401, '로그인이 만료됐거나 비밀번호가 다른 곳에서 바뀌었습니다. 다시 로그인하세요.')
     return {'ok': True}
 
 
@@ -511,10 +542,10 @@ def alert(body: Analyze, user=Depends(auth.current_user)):
     return {**result, 'item': item}
 
 
-def mark_download(response: Response, token: str | None) -> Response:
-    """화면이 '파일 준비 중' 안내를 내릴 수 있도록, 요청에 딸려 온 표식을 응답 쿠키로 돌려준다."""
+def mark_download(response: Response, token: str | None, state: str = '1') -> Response:
+    """화면이 '파일 준비 중' 안내를 내릴 수 있도록, 요청에 딸려 온 표식을 응답 쿠키로 돌려준다(1 준비됨, 0 만들지 못함)."""
     if token and re.fullmatch(r'[A-Za-z0-9_-]{1,32}', token):
-        response.set_cookie(f'dl_{token}', '1', max_age=60, path='/', samesite='lax', secure=config.COOKIE_SECURE, httponly=False)
+        response.set_cookie(f'dl_{token}', state, max_age=60, path='/', samesite='lax', secure=config.COOKIE_SECURE, httponly=False)
     return response
 
 
@@ -559,8 +590,10 @@ def export_rows(user, kind, start=None, end=None, office_id=None, line=None, met
             else:
                 for b in c.execute('SELECT * FROM bills WHERE meter_id=? AND period>=? AND period<=? ORDER BY period,gubun', (m['id'], start[:7], end[:7])):
                     payload = json.loads(b['payload']) | {'source': b['source']}
-                    # 실무자가 보는 열만 둔다: 수집 출처·내부 표식(summary_only 등)·집계값은 빼고 원문 항목만 쓴다.
-                    rows.append(meta | {'청구월': b['period'], '청구구분': b['gubun'], '고지번호': b['notice_number'], **{k: payload.get(k) for k in ('사용량', '지하수사용량', '총사용량', '납부금액', '부과금액', '총사용금액', '차감금액', '상수도_기본료', '상수도_사용료', '하수도_사용료', '물이용부담금', '계량기대금', '설치비', '연체금', '수납상태', '납부방법', '납기일')}})
+                    # 실무자가 보는 열만 둔다: 수집 출처·내부 표식(summary_only 등)은 빼고 원문 항목만 쓴다.
+                    # 밑줄로 시작하는 값은 통계가 쓰는 내부 집계라 Excel에는 나가지 않는다.
+                    rows.append(meta | {'청구월': b['period'], '청구구분': b['gubun'], '고지번호': b['notice_number'], **{k: payload.get(k) for k in ('사용량', '지하수사용량', '총사용량', '납부금액', '부과금액', '총사용금액', '차감금액', '상수도_기본료', '상수도_사용료', '하수도_사용료', '물이용부담금', '계량기대금', '설치비', '연체금', '수납상태', '납부방법', '납기일')},
+                                        '_집계사용량_톤': catalog.bill_usage(payload)})
     return rows
 
 
@@ -573,7 +606,7 @@ def export_filename(kind, meter=None, start=None, end=None):
 
 @app.get('/api/export.xlsx')
 def export(kind: str = 'usage', start: str | None = None, end: str | None = None, office_id: str | None = None, line: str | None = None, meter_id: str | None = None, dl: str | None = None, user=Depends(auth.current_user)):
-    rows = export_rows(user, kind, start, end, office_id, line, meter_id)
+    rows = [{k: v for k, v in row.items() if not k.startswith('_')} for row in export_rows(user, kind, start, end, office_id, line, meter_id)]
     with db.connect() as c:
         meter = get_meter(c, meter_id, user) if meter_id else None
     name = quote(export_filename(kind, meter, start, end), safe='')
@@ -592,7 +625,7 @@ def statistics(start: str | None = None, end: str | None = None, office_id: str 
                 if row.get('납부금액') is None:
                     row['납부금액'] = row.get('부과금액')
                     group['summary_bill_count'] += 1
-            fields = [('usage_ton', '사용량_톤')] if kind == 'usage' else [('billed_usage_ton', '집계사용량_톤'), ('billed_won', '납부금액')]
+            fields = [('usage_ton', '사용량_톤')] if kind == 'usage' else [('billed_usage_ton', '_집계사용량_톤'), ('billed_won', '납부금액')]
             for target, source in fields:
                 number = catalog.number(row.get(source))
                 if number is not None:

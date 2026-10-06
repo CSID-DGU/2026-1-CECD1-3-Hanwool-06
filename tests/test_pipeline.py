@@ -241,16 +241,38 @@ class PipelineTest(unittest.TestCase):
         match = self.path / 'meter_match.csv'
         match.write_text('고객번호,호선\n000000001,\n000000002,2.0\n', encoding='utf-8-sig')
         out = self.path / 'ridership'
-        with patch.object(monthly, 'MATCH', match):
+        with patch.object(riders, 'MATCH', match):
             for _ in range(2):  # importing the same month again changes nothing
                 self.assertEqual(monthly.import_month(source, meters=METERS, out_dir=out), ['2026-05-01', '2026-05-02'])
         first = {r['고객번호']: r['총승객수'] for r in self.rows(out / '2026-05-01.csv')}
         self.assertEqual(first, {'000000001': '330', '000000002': '3'})  # whole station vs. its own line
+        # The daily collector writes the same customer and date, so it must count by the same rule.
+        byline, bystn = monthly.read_month(source)['20260501']
+        with patch.object(riders, 'MATCH', match):
+            riders.scrape(date(2026, 5, 1), meters=METERS, out_dir=self.path / 'daily-api', fetcher=lambda *_: (byline, bystn))
+        self.assertEqual({r['고객번호']: r['총승객수'] for r in self.rows(self.path / 'daily-api/2026-05-01.csv')}, first)
         self.assertEqual([(r['고객번호'], r['총승객수']) for r in self.rows(out / '2026-05-02.csv')], [('000000002', '7')])
         self.assertEqual(json.loads((out / '2026-05-02.status.json').read_text())['missing'], ['000000001'])
         source.write_text(source.read_text(encoding='utf-8-sig').replace('"3","4"', '"-3","4"'), encoding='utf-8-sig')
-        with patch.object(monthly, 'MATCH', match), self.assertRaises(ValueError):
+        with patch.object(riders, 'MATCH', match), self.assertRaises(ValueError):
             monthly.import_month(source, meters=METERS, out_dir=out)
+
+    def test_monthly_download_never_keeps_an_empty_or_wrong_file(self):
+        good = ('"사용일자","노선명","역명","승차총승객수","하차총승객수","등록일자"\n"20260501","1호선","강동","10","20","20260504"\n').encode('utf-8-sig')
+        session = Mock()
+        fetch = lambda: monthly.download_month('2026-05', '7', session, raw_dir=self.path)
+        for body in (b'', b'  \n', good.replace(b'20260501', b'20260401'), b'<html>login</html>'):
+            session.post.return_value = Mock(content=body, raise_for_status=Mock())
+            with self.assertRaises(ValueError):
+                fetch()
+            self.assertEqual(list(self.path.glob('CARD_SUBWAY_MONTH_*')), [])
+        # an empty file left by an earlier run is fetched again instead of being trusted
+        (self.path / 'CARD_SUBWAY_MONTH_202605.csv').write_bytes(b'')
+        session.post.return_value = Mock(content=good, raise_for_status=Mock())
+        self.assertEqual(fetch().read_bytes(), good)
+        session.post.reset_mock()
+        self.assertEqual(fetch().read_bytes(), good)   # a good file is reused without another request
+        session.post.assert_not_called()
 
     def test_bills_preserve_partial_success_and_supplementary_rows(self):
         def fetch(_session, customer, *_args, **_kwargs):
@@ -351,6 +373,43 @@ class PipelineTest(unittest.TestCase):
         manifest = json.loads((self.path / 'snapshot/manifest.json').read_text())
         self.assertEqual(manifest['risk_as_of'], '2026-05-31')
         self.assertEqual(json.loads((self.path / 'snapshot' / manifest['directory'] / 'risk.json').read_text()), risk)
+
+    def test_model_refresh_that_cannot_run_keeps_the_previous_risk_and_fails(self):
+        master = pd.DataFrame({'고객번호': ['000000001'], '날짜': ['2026-06-01'], '일사용량_톤': [12.]})
+        riders = pd.DataFrame({'고객번호': ['000000001'], '날짜': ['2026-06-01'], '총승객수': [30.]})
+        risk = {'000000001': [{'date': '2026-05-31', 'severity': '주의'}]}
+        args = Namespace(runtime_dir=self.path, start=date(2026, 6, 1), end=date(2026, 6, 1),
+                         water=False, ridership=False, bills=False, model=True, train_end=None, valid_end=None, test_end=None, jobs=1)
+        # No meter has enough history, so the requested model run is impossible.
+        with patch('back.api.catalog.collector_meters', return_value=METERS), \
+             patch('back.api.catalog.data_sources', return_value=({}, risk)), \
+             patch.object(refresh, 'build_dataset', return_value=(master, riders, [], set())), \
+             patch.object(refresh, 'build_calendar'):
+            self.assertEqual(refresh.run(args), 1)
+        manifest = json.loads((self.path / 'snapshot/manifest.json').read_text())
+        self.assertEqual(json.loads((self.path / 'snapshot' / manifest['directory'] / 'risk.json').read_text()), risk)
+        self.assertIn('이전 위험도', json.loads((self.path / 'refresh_report.json').read_text())['errors'][0])
+
+    def test_empty_previous_split_does_not_poison_the_default_boundaries(self):
+        processed = self.path / 'processed'
+        processed.mkdir()
+        (self.path / 'billing').mkdir()
+        (self.path / 'ml_dataset').mkdir()
+        dates = pd.date_range('2025-01-01', periods=110).strftime('%Y-%m-%d')
+        pd.DataFrame([{'고객번호': '1', '검침일': day, '일사용량_톤': 10} for day in dates]).to_csv(processed / 'daily_water_usage.csv', index=False)
+        pd.DataFrame([{'고객번호': '1', '사용일': dates[-1], '승차총승객수': 30, '하차총승객수': 40}]).to_csv(processed / 'ridership.csv', index=False)
+        pd.DataFrame([{'고객번호': '1', '일일CSV파일명': '옛이름'}]).to_csv(self.path / 'billing/meter_match.csv', index=False)
+        for name, last in (('train', dates[89]), ('valid', dates[103])):
+            pd.DataFrame({'날짜': [last]}).to_csv(self.path / 'ml_dataset' / f'{name}.csv', index=False)
+        build = lambda **kw: build_dataset(self.path / 'output', meters=METERS, data_root=self.path, daily_root=self.path / 'daily', **kw)
+        # Boundaries this early leave no meter eligible, so the split files are written empty.
+        self.assertEqual(build(train_end=dates[10], valid_end=dates[20])[3], set())
+        self.assertEqual(self.rows(self.path / 'output/train.csv'), [])
+        # The next default run must not read "nan" from those empty files; it falls back to the repository split.
+        self.assertEqual(build()[3], {'000000001'})
+        self.assertEqual(self.rows(self.path / 'output/train.csv')[-1]['날짜'], dates[89])
+        with self.assertRaises(ValueError):
+            build(train_end='nan', valid_end=dates[103])
 
     def test_dataset_joins_customer_numbers_and_withholds_new_contract(self):
         processed = self.path / 'processed'

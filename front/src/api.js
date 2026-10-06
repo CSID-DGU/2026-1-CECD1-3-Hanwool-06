@@ -79,4 +79,19 @@ export const getSummary = (date) => request(`/summary?${new URLSearchParams(date
 export const analyzeCause = (meter_id, date) => request("/analyze", { method: "POST", body: { meter_id, date } });
 export const sendAlert = (meter_id, date) => request("/alert", { method: "POST", body: { meter_id, date } });
 export const pdfUrl = (id, download = false) => `/api/bills/${encodeURIComponent(id)}/pdf?download=${download}`;
+// 파일 요청에 붙인 표식을 서버가 응답 쿠키로 돌려준다(1 준비됨, 0 만들지 못함). 화면은 그때까지 안내를 띄운다.
+// 결과: true 준비됨, false 실패했거나 끝내 오지 않음, null 사용자가 안내를 닫음.
+export function waitForDownload(name, timeoutMs, closed) {
+  return new Promise((resolve) => {
+    const started = Date.now();
+    const timer = setInterval(() => {
+      const mark = document.cookie.split("; ").find((c) => c.startsWith(`${name}=`));
+      if (!mark && !closed() && Date.now() - started <= timeoutMs) return;
+      clearInterval(timer);
+      document.cookie = `${name}=; Max-Age=0; path=/`;
+      resolve(mark ? mark.endsWith("=1") : closed() ? null : false);
+    }, 300);
+  });
+}
+
 export const exportUrl = (params) => `/api/export.xlsx?${new URLSearchParams(Object.entries(params).filter(([, value]) => value != null && value !== "" && value !== "all"))}`;

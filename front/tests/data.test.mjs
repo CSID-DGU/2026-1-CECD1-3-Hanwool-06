@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { billGroundwater, billLabel, billNoticeNumber, billUsage, billWindow, buildRisk, buildStations, chartRange, detailHref, latestDate, monthCells, shiftMonth, signedPct } from "../src/pages/Detail/data.js";
 import { buildDashboard, buildMapGroups } from "../src/pages/Dashboard/dashboardData.js";
-import { deleteMeter, exportUrl, getData, getMeters, request, restoreMeter, saveCollectionSettings, setCsrfToken, startCollection } from "../src/api.js";
+import { deleteMeter, exportUrl, getData, getMeters, request, restoreMeter, saveCollectionSettings, setCsrfToken, startCollection, waitForDownload } from "../src/api.js";
 import { collectionNeedsRefresh, collectionTime, isCollectionActive, meterCollectionState } from "../src/collection.js";
 import { statisticsPeriod } from "../src/pages/statisticsData.js";
 
@@ -225,4 +225,23 @@ test("delete, restore, collection and settings preserve API methods and customer
     assert.equal(calls[5].body, '{"enabled":true,"hour":8}');
     for (const call of calls.slice(1)) assert.equal(call.headers["X-CSRF-Token"], "test-token");
   } finally { globalThis.fetch = originalFetch; setCsrfToken(); }
+});
+
+test("the download notice learns whether the file came, failed, never came, or was closed", async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval", "Date"] });
+  const jar = { cookie: "", closed: false };
+  globalThis.document = { get cookie() { return jar.cookie; }, set cookie(value) { jar.cleared = value; jar.cookie = ""; } };
+  t.after(() => { delete globalThis.document; });
+  const outcome = (cookie, wait = 300) => {
+    const result = waitForDownload("dl_x", 1000, () => jar.closed);
+    jar.cookie = cookie;
+    t.mock.timers.tick(wait);
+    return result;
+  };
+  assert.equal(await outcome("session=abc; dl_x=1"), true);
+  assert.match(jar.cleared, /^dl_x=; Max-Age=0/);   // the mark is used once
+  assert.equal(await outcome("dl_x=0"), false);       // the server could not make the file
+  assert.equal(await outcome("", 1500), false);       // nothing came back in time
+  jar.closed = true;
+  assert.equal(await outcome(""), null);              // closing the notice is not an error
 });

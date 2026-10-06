@@ -74,11 +74,21 @@ def build_dataset(output_dir, *, meters, data_root=None, daily_root=None, train_
     master["요일"] = dt.dt.weekday.map(dict(enumerate("월화수목금토일")))
     master["일유형"] = pd.NA
     master = master.sort_values(["고객번호", "날짜"]).reset_index(drop=True)
+    def split_end(folder, name):   # a split written empty has no boundary to offer
+        path = folder / f"{name}.csv"
+        dates = _read_csv(path)["날짜"].dropna() if path.exists() else []
+        return str(max(dates)) if len(dates) else None
+
     # Preserve established evaluation cutoffs unless explicitly retraining with new boundaries:
-    # the previous runtime split if there is one, else the fixed dataset in the repository.
-    previous = output_dir if (output_dir / "valid.csv").exists() else data_root / "ml_dataset"
-    train_end = train_end or str(_read_csv(previous / "train.csv")["날짜"].max())
-    valid_end = valid_end or str(_read_csv(previous / "valid.csv")["날짜"].max())
+    # the previous runtime split if it holds rows, else the fixed dataset in the repository.
+    previous = next((folder for folder in (output_dir, data_root / "ml_dataset")
+                     if split_end(folder, "train") and split_end(folder, "valid")), None)
+    train_end = train_end or previous and split_end(previous, "train")
+    valid_end = valid_end or previous and split_end(previous, "valid")
+    if not train_end or not valid_end:
+        raise ValueError("No split boundaries available; pass --train-end and --valid-end")
+    for boundary in filter(None, (train_end, valid_end, test_end)):
+        date.fromisoformat(str(boundary))   # never compare against "nan" or another non-date
     if train_end >= valid_end or test_end and valid_end >= test_end:
         raise ValueError("train_end must precede valid_end, and valid_end must precede test_end")
     # test_end only bounds what the model is evaluated on; master keeps every observation for the snapshot.
@@ -206,7 +216,6 @@ def run(args):
 
 
 def _run(args):
-    import pandas as pd
     import yaml
     from back.api.catalog import collector_meters as registered
     meters = registered()
@@ -272,9 +281,11 @@ def _run(args):
                 anomalies = _read_csv(runtime / "model" / "test_anomalies.csv")
                 if len(anomalies) != metrics["test"]["n_samples"]:
                     raise ValueError("Saved prediction count differs from model evaluation")
-            elif args.model:
-                anomalies = pd.DataFrame()
             else:
+                if args.model:
+                    # The requested model run is impossible: say so and keep the last good risk
+                    # instead of publishing an empty one as a success.
+                    report["errors"].append("model: 학습·평가할 자료가 부족해 위험도를 새로 계산하지 못했습니다. 이전 위험도를 유지합니다")
                 manifest_path = runtime / "snapshot" / "manifest.json"
                 if manifest_path.exists():
                     old_manifest = json.loads(manifest_path.read_text())

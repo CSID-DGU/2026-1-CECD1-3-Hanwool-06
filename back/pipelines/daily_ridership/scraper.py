@@ -6,10 +6,13 @@
 
 집계: 응답은 일자×시간×권종×사용자구분별 승차(rideNope)/하차(gffNope) → 역·호선별 전부 합산.
 매칭: API stnNm 은 부역명 '(...)' 을 달고 '역' 이 없으므로 등록된 계약의 역명과 정규화해 맞춘다.
-      환승역은 호선별(모델 역명이 base+호선숫자). 호선 공란 미터는 단일호선이라 역 총합=그 호선.
+      환승역은 호선별(모델 역명이 base+호선숫자). 검토 매핑(meter_match.csv)에 호선이 비어 있는 계량기는
+      기존 정제 자료(data/processed/ridership.csv)와 같이 같은 이름의 역 전체 합계를 쓴다.
+      월별 파일 수집(monthly.py)도 이 기준을 그대로 쓴다: 같은 고객·날짜에 쓰므로 기준이 하나여야 한다.
 """
 from __future__ import annotations
 
+import csv
 import json
 import os
 import re
@@ -20,7 +23,8 @@ from collections import defaultdict
 from datetime import date
 from pathlib import Path
 
-from back.pipelines.common import RUNTIME, collector_meters, customer_number, merge_csv, write_json
+from back.pipelines.common import ROOT, RUNTIME, collector_meters, customer_number, merge_csv, write_json
+MATCH = ROOT / "data" / "billing" / "meter_match.csv"
 ENDPOINT = "https://apis.data.go.kr/B553766/psgr/getStnPsgr"
 OUT_DIR = RUNTIME / "daily" / "ridership"
 NUM_OF_ROWS = 1000   # 하루 ≈ 66k행 → ~66콜/일 (일일한도 10,000)
@@ -47,13 +51,16 @@ def _parse_line(line_name: str) -> int | None:
 
 def _load_meters(registered=None) -> list[dict]:
     """등록 계약 → 고객번호와 승하차 API 매칭용 역·호선."""
+    with MATCH.open(encoding="utf-8-sig", newline="") as fp:
+        whole_station = {customer_number(row["고객번호"]) for row in csv.DictReader(fp) if not row["호선"]}
     meters = []
     for row in collector_meters(registered):
         base = row["station_name"].strip()
-        ln = row.get("line")
+        cid = customer_number(row["customer_number"])
+        ln = None if cid in whole_station else row.get("line")
         line = int(float(ln)) if ln else None
         meters.append({
-            "고객번호": customer_number(row["customer_number"]),
+            "고객번호": cid,
             "역명": base,
             "key역": _normalize_station(base),
             "호선": line,

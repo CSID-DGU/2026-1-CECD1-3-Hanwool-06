@@ -5,7 +5,7 @@
 
     python -m back.pipelines.daily_ridership.monthly 2026-05 2026-08
 
-집계 기준은 같은 원천으로 만든 data/processed/ridership.csv 와 같다. 검토 매핑(meter_match.csv)에
+집계 기준은 scraper.py 와 같다(같은 원천으로 만든 data/processed/ridership.csv 의 기준): 검토 매핑에
 호선이 비어 있는 계량기는 같은 이름의 역 전체 합계를, 호선이 있는 계량기와 새 계량기는 그 호선만 쓴다.
 """
 from __future__ import annotations
@@ -19,14 +19,14 @@ from pathlib import Path
 
 import requests
 
-from back.pipelines.common import ROOT, RUNTIME, atomic_bytes, collection_lock, collector_meters, customer_number
+from back.pipelines.common import RUNTIME, atomic_bytes, collection_lock
 from back.pipelines.daily_ridership.scraper import _normalize_station, _parse_line, scrape
 from back.scripts.billing_etl.i121_crawler.fetch import shift_month
 
 LIST_URL = "https://data.seoul.go.kr/dataList/OA-12914/F/1/datasetView.do"
 DOWNLOAD_URL = "https://datafile.seoul.go.kr/bigfile/iot/inf/nio_download.do?useCache=false"
 RAW_DIR = RUNTIME / "raw" / "ridership_monthly"
-MATCH = ROOT / "data" / "billing" / "meter_match.csv"
+COLUMNS = {"사용일자", "노선명", "역명", "승차총승객수", "하차총승객수"}
 
 
 def published_months(session) -> dict[str, str]:
@@ -37,29 +37,40 @@ def published_months(session) -> dict[str, str]:
     return {f"{year}-{month}": seq for seq, year, month in found}
 
 
+def _rows(content: bytes):
+    try:
+        text = content.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = content.decode("cp949")  # 2022년 이전 파일
+    return csv.DictReader(text.splitlines())
+
+
+def _is_month(content: bytes, month: str) -> bool:
+    """그 달의 승하차 파일이 맞는가. 빈 응답이나 다른 달 파일은 아니다."""
+    first = next(_rows(content), None)
+    return bool(first) and COLUMNS <= set(first) and str(first["사용일자"]).startswith(month.replace("-", ""))
+
+
 def download_month(month: str, seq: str, session, raw_dir=None) -> Path:
-    """한 달 파일을 받아 둔다. 이미 받은 달은 다시 받지 않는다."""
+    """한 달 파일을 받아 둔다. 제대로 받아 둔 달은 다시 받지 않는다."""
     path = Path(raw_dir or RAW_DIR) / f"CARD_SUBWAY_MONTH_{month.replace('-', '')}.csv"
-    if path.exists():
-        return path
+    if path.exists() and _is_month(path.read_bytes(), month):
+        return path   # 빈 파일이나 잘못 받은 파일이 남아 있으면 믿지 않고 다시 받는다
     response = session.post(DOWNLOAD_URL, timeout=120, headers={"Referer": LIST_URL, "Origin": "https://data.seoul.go.kr"},
                             data={"infId": "OA-12914", "infSeq": "3", "seqNo": seq, "seq": seq})
     response.raise_for_status()
     if response.content.lstrip()[:1] == b"<":
         raise ValueError("Monthly ridership download returned a page instead of a CSV file")
+    if not _is_month(response.content, month):
+        raise ValueError("Monthly ridership download is empty or is not the requested month")
     atomic_bytes(path, response.content)
     return path
 
 
 def read_month(path) -> dict:
     """{YYYYMMDD: ((역, 호선)별 합계, 역별 합계)}. 승차와 하차를 더한다."""
-    content = Path(path).read_bytes()
-    try:
-        text = content.decode("utf-8-sig")
-    except UnicodeDecodeError:
-        text = content.decode("cp949")  # 2022년 이전 파일
     days = defaultdict(lambda: (defaultdict(int), defaultdict(int)))
-    for row in csv.DictReader(text.splitlines()):
+    for row in _rows(Path(path).read_bytes()):
         if not re.fullmatch(r"\d{8}", row["사용일자"]):
             raise ValueError("Unexpected date in monthly ridership file")
         ride, alight = int(row["승차총승객수"]), int(row["하차총승객수"])
@@ -72,17 +83,8 @@ def read_month(path) -> dict:
     return days
 
 
-def monthly_meters(registered=None) -> list[dict]:
-    """등록 계량기에 기존 정제 자료와 같은 집계 기준을 입힌다(호선을 지우면 역 전체 합계를 쓴다)."""
-    with MATCH.open(encoding="utf-8-sig", newline="") as fp:
-        whole_station = {customer_number(row["고객번호"]) for row in csv.DictReader(fp) if not row["호선"]}
-    return [meter | {"line": None} if customer_number(meter["customer_number"]) in whole_station else meter
-            for meter in collector_meters(registered)]
-
-
 def import_month(path, *, meters=None, out_dir=None) -> list[str]:
     """한 달 파일을 날짜별 파일로 풀어 쓴다. 같은 고객·날짜의 기존 행은 새 값으로 바뀐다."""
-    meters = monthly_meters(meters)
     written = []
     for ymd, totals in sorted(read_month(path).items()):
         day = date(int(ymd[:4]), int(ymd[4:6]), int(ymd[6:]))

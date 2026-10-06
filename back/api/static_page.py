@@ -14,6 +14,7 @@ from pathlib import Path
 from . import catalog, config
 
 DIST = config.ROOT / 'front/dist'
+MARK = 'window.__STATIC_DATA_GZ__'   # 화면이 자료를 읽는 자리이자, 앞서 만든 저장본을 알아보는 표시
 
 
 def current_payload() -> dict:
@@ -25,6 +26,16 @@ def build(destination: Path, payload: dict | None = None, dist: Path = DIST) -> 
     index = dist / 'index.html'
     if not index.is_file():
         raise FileNotFoundError('front/dist 가 없습니다. 먼저 npm run build 를 실행하세요.')
+    destination = Path(destination).resolve()
+    # 서버가 그대로 내보내는 폴더(dist)나 빌드 때 그리로 복사되는 폴더(public)에 두면 로그인 없이 전체 자료가 열린다.
+    if any(destination.is_relative_to(folder.resolve()) for folder in (dist, dist.parent / 'public')):
+        raise ValueError('화면이 공개되는 폴더(front/dist, front/public)에는 저장할 수 없습니다. 다른 폴더를 고르세요.')
+    if destination.is_dir():
+        raise ValueError('폴더가 아니라 저장할 파일 이름을 적어 주세요.')
+    if destination.exists():   # 앞서 만든 저장본만 새로 덮어쓴다
+        with destination.open('rb') as existing:
+            if MARK.encode() not in existing.read(4096):
+                raise ValueError('같은 이름의 다른 파일이 이미 있습니다. 덮어쓰지 않으니 다른 이름을 쓰세요.')
     html = index.read_text(encoding='utf-8')
     assets = {path.name: path for path in (dist / 'assets').iterdir()}
     public = {path.name: path for path in dist.iterdir() if path.is_file() and path.name != 'index.html'}   # front/public 의 파일
@@ -47,8 +58,7 @@ def build(destination: Path, payload: dict | None = None, dist: Path = DIST) -> 
                   lambda m: '<style>' + inline(m.group(1), 'style') + '</style>', html)
     data = payload if payload is not None else current_payload()
     packed = base64.b64encode(gzip.compress(json.dumps(data, ensure_ascii=False, separators=(',', ':')).encode(), 9)).decode()
-    html = html.replace('<script type="module">', f'<script>window.__STATIC_DATA_GZ__="{packed}";</script>\n    <script type="module">', 1)
-    destination = Path(destination)
+    html = html.replace('<script type="module">', f'<script>{MARK}="{packed}";</script>\n    <script type="module">', 1)
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(html, encoding='utf-8')
     destination.chmod(0o600)

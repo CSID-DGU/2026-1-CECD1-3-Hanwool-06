@@ -126,10 +126,20 @@ def _collect(meter, session, notify):
     allowed = getattr(session, 'arisu_customer_numbers', None)
     login_error = getattr(session, 'arisu_login_error', None)
     notes = []
+    # Consecutive usable customer lists that did not contain this customer.
+    unlisted = 0 if isinstance(allowed, frozenset) and cid in allowed else state.get("unlisted_runs", 0)
     if daily_enabled and isinstance(allowed, frozenset) and cid not in allowed:
         if isinstance(login_error, str):
             errors.append('일일 사용량: 아리수 계정 설정 또는 로그인을 확인해 주세요')
+        elif not allowed:
+            # An empty list is a failed lookup, not proof that every customer left the account.
+            errors.append('일일 사용량: 아리수에서 고객 목록을 받지 못해 이번에는 조회하지 않았습니다')
+        elif unlisted < 1:
+            # A single list without this customer may be a partial response; switch off only when it repeats.
+            unlisted += 1
+            errors.append('일일 사용량: 아리수 계정의 고객 목록에 이 고객번호가 없습니다. 다음 수집에서도 없으면 일일 관제에서 제외합니다')
         else:
+            unlisted += 1
             # The account cannot read this customer's daily meter: keep bills only instead of failing every day.
             with db.connect() as conn:
                 conn.execute("UPDATE meters SET daily_enabled=0,updated_at=? WHERE id=?", (db.now(), meter["id"]))
@@ -235,8 +245,8 @@ def _collect(meter, session, notify):
             errors.append("일일 자료의 화면 반영에 실패했습니다")
     known_issues -= set(fresh)   # a day the source has since corrected is an ordinary observation again
     try:
-        write_json(state_path, {"water_checked": checked, "water_excluded": sorted(known_issues), "bill_retry_from": None,
-                                "bill_retry_windows": failed_windows, "updated_at": db.now()})
+        write_json(state_path, {"water_checked": checked, "water_excluded": sorted(known_issues), "unlisted_runs": unlisted,
+                                "bill_retry_from": None, "bill_retry_windows": failed_windows, "updated_at": db.now()})
     except OSError as exc:
         logger.error("Collection checkpoint write failed (%s)", type(exc).__name__)
         errors.append("수집 상태 저장에 실패했습니다")
