@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { getCollection, saveCollectionSettings, startCollection } from "../api.js";
+import { getCollection, isStatic, saveCollectionSettings, startCollection } from "../api.js";
 import { collectionLabel, collectionNeedsRefresh, collectionTime, isCollectionActive, isCollectionFinished, meterCollectionState } from "../collection.js";
 
 export function useCollection(userId, onComplete) {
@@ -53,7 +53,12 @@ export function useCollection(userId, onComplete) {
   return { data, error, busy, refresh, start, saveSettings };
 }
 
-export default function CollectionPanel({ collection, user, meters = [], meterId, showSettings = false }) {
+// 저장된 화면에서는 수집을 실행할 수 없으므로 패널을 그리지 않는다.
+export default function CollectionPanel(props) {
+  return isStatic ? null : <Panel {...props} />;
+}
+
+function Panel({ collection, user, meters = [], meterId, showSettings = false }) {
   const [notice, setNotice] = useState("");
   const [noticeJobId, setNoticeJobId] = useState(null);
   const [actionError, setActionError] = useState("");

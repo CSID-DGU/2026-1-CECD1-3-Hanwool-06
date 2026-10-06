@@ -187,7 +187,6 @@ button.line-badge[aria-pressed="false"] { background: var(--paper); box-shadow: 
 .filter-reset { align-self: center; margin-left: auto; }
 
 .workspace { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 24px; align-items: start; }
-.workspace--billing { grid-template-columns: 1fr; }
 .map-panel, .side-panel { min-width: 0; }
 .zoom-controls { display: flex; align-items: center; gap: 4px; }
 .zoom-controls button { min-width: 28px; height: 28px; padding: 0 8px; border: 1px solid var(--rule); border-radius: var(--radius); background: var(--paper); font-size: 13px; }
@@ -225,6 +224,15 @@ button.line-badge[aria-pressed="false"] { background: var(--paper); box-shadow: 
 .station-row-side { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
 .station-row-side b { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .side-panel > .text-button { margin-top: 12px; }
+/* 청구 전용 화면에서 노선도 옆에 뜨는 역 정보 */
+.station-card { display: block; padding: 10px 4px; border-bottom: 1px solid var(--rule-soft); font-size: 13px; }
+.station-card:hover { background: #fafbfc; }
+.station-card strong { display: block; font-weight: 600; }
+.station-card small { display: block; color: var(--mute); }
+.station-card dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; max-width: 340px; margin: 6px 0 0; }
+.station-card dl > div { display: contents; }
+.station-card dt { color: var(--mute); }
+.station-card dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
 
 @media (max-width: 1080px) {
   .topbar { position: static; }

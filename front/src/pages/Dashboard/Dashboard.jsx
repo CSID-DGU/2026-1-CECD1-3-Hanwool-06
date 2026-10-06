@@ -44,7 +44,7 @@ export default function Dashboard({ data, collection }) {
       <button type="button" aria-pressed={billingOnly} onClick={() => switchView("billing")} title="청구서만 수집하는 계량기">청구 전용 <span>{billingStations.length}</span></button>
     </div>
     <FilterPanel {...{ searchTerm, setSearchTerm, resetFilters, selectedLine, selectedOffice, selectedRisk, setSelectedLine, setSelectedOffice, setSelectedRisk, offices, billingOnly }} stations={viewStations} />
-    <section className={`workspace ${billingOnly ? "workspace--billing" : ""}`}>
+    <section className="workspace">
       <MapPanel stationMap={new Map(filteredStations.map((s) => [s.id, s]))} locations={data.locations || {}} billingOnly={billingOnly} />
       {!billingOnly && <aside className="side-panel" aria-label="우선 확인할 계량기">
         <SectionTitle as="h2">우선 확인 대상 <span className="count">{alerts.length + warnings.length}개</span></SectionTitle>

@@ -1,4 +1,4 @@
-import { buildStations, SEVERITY_TONE } from "../Detail/data.js";
+import { billUsage, buildStations, SEVERITY_TONE } from "../Detail/data.js";
 // 서울교통공사 노선색.
 export const lineColors = {
   1: "#0052a4", 2: "#00a84d", 3: "#ef7c1c", 4: "#00a5de", 5: "#996cac",
@@ -17,9 +17,11 @@ export function buildDashboard(data) {
     const reference = data.status?.reference_date || data.status?.latest_risk;
     const stale = Boolean(l.risk && reference && l.risk.기준일 < String(reference).slice(0, 10));
     const waiting = l.dataMode === "daily" && !l.risk && !l.riskError;
+    const lastBill = l.bills.at(-1);
     return {
       id: l.meterId, stationId: s.id, name: s.역명, displayName: l.display_name || l.고객번호,
-      dataMode: l.dataMode, latestBillMonth: l.bills.at(-1)?.ym || "",
+      dataMode: l.dataMode, latestBillMonth: lastBill?.ym || "",
+      latestBillUsage: lastBill ? billUsage(lastBill) : null, latestBillAmount: lastBill?.납부금액 ?? null,
       office: l.영업사업소, officeId: String(l.office_id ?? ""), lines: [String(l.line)],
       risk: l.dataMode === "billing_only" ? "billing_only" : l.dataMode === "pending" ? "pending" : l.riskError || stale ? "unknown" : SEVERITY_TONE[l.risk?.severity] || "analysis_pending",
       riskDetail: l.dataMode !== "daily" ? "" : l.riskError ? "최근 관측값 오류" : stale ? "분석일이 오래됨" : "",

@@ -75,6 +75,11 @@ test("billing-only, first collection and analysis waiting stay outside risk clas
   assert.equal(byId.pending.risk, "pending");
   assert.equal(byId.analysis.risk, "analysis_pending");
   assert.equal(byId.analysis.riskLabel, "");   // 까닭을 모르면 이름에 덧붙이지 않는다
+  // 청구 전용 계량기의 옆 칸에 쓰는 최근 청구 내역. 청구서가 없으면 0이 아니라 빈 값이다.
+  const billed = buildDashboard({ meters, bills: { billing: { bills: [{ ym: "2026-06", 사용량: 9, 납부금액: 1000 }, { ym: "2026-08", 사용량: 12, 납부금액: 3400 }] } } }).stations;
+  const card = billed.find((s) => s.id === "billing");
+  assert.deepEqual([card.latestBillMonth, card.latestBillUsage, card.latestBillAmount], ["2026-08", 12, 3400]);
+  assert.deepEqual([byId.billing.latestBillMonth, byId.billing.latestBillUsage, byId.billing.latestBillAmount], ["", null, null]);
   const short = buildDashboard({ meters, stations: { analysis: { history_short: true }, zero: { history_short: true } },
     daily: { zero: { usage: [{ date: "2026-06-01", value: 0 }] }, analysis: { usage: [{ date: "2026-06-01", value: 5 }] } },
     risk: { zero: [{ ...oldRisk[0], actual: 0, severity: "정상" }] } }).stations;
