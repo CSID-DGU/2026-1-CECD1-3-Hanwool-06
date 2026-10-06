@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import yaml
+from scipy.stats import trim_mean
 from tqdm.auto import tqdm
 from back.pipelines.common import atomic_text, write_json
 
@@ -49,6 +50,11 @@ def save_csv(df: pd.DataFrame, path: str | Path) -> None:
     atomic_text(Path(path), df.to_csv(index=False), encoding="utf-8-sig")
 
 
+def save_model(forecaster, path: str | Path) -> None:
+    """학습한 최종 모델을 LightGBM 텍스트 형식으로 저장한다(lightgbm.Booster(model_file=...) 로 다시 읽는다)."""
+    atomic_text(Path(path), forecaster.model.booster_.model_to_string())
+
+
 def format_summary(summary: dict) -> str:
     """metric.summarize 결과를 한 줄 로그 문자열로 만든다."""
     values = [f"{key}={summary[key]:.4f}" if summary[key] is not None else f"{key}=N/A"
@@ -56,42 +62,46 @@ def format_summary(summary: dict) -> str:
     return ' '.join(values) + f" 경고={summary['경고']} 주의={summary['주의']}"
 
 
-# ── 예측 후처리 (bias 보정) ─────────────────────────────────────────
-# 모두 valid(과거) 잔차만 쓰므로 누수 없음. config 의 postprocess 섹션으로 켜고 끈다.
+# ── 예측 후처리 ────────────────────────────────────────────────────
+# config 의 postprocess 섹션으로 켜고 끈다. 온라인 잔차보정은 그 역의 과거 잔차만, 같은 날 공통 보정은
+# 다른 역의 당일 실측만 쓴다. 어느 것도 그 역 자신의 당일 실측은 쓰지 않는다.
 
-def build_valid_bias(valid_meta: pd.DataFrame, valid_pred: np.ndarray) -> dict:
-    """valid 잔차(실측-예측)의 전역/역별/역×요일 중앙값을 구한다 (test 보정 기준)."""
-    frame = valid_meta.copy()
-    frame["_residual"] = frame[TARGET].to_numpy(dtype=float) - np.asarray(valid_pred, dtype=float)
-    frame["_dow"] = pd.to_datetime(frame["날짜"]).dt.dayofweek
-    return {
-        "global": float(frame["_residual"].median()),
-        "station": frame.groupby("고객번호")["_residual"].median(),
-        "station_dow": frame.groupby(["고객번호", "_dow"])["_residual"].median(),
-    }
+def apply_common_shift(meta: pd.DataFrame, pred: np.ndarray, level: np.ndarray, cfg: dict) -> np.ndarray:
+    """같은 날 다른 역들이 예측에서 함께 벗어난 만큼 예측을 옮긴다(자기 자신은 빼고 본다).
 
-
-def postprocess_predictions(meta: pd.DataFrame, pred: np.ndarray, valid_bias: dict, cfg: dict) -> np.ndarray:
-    """config postprocess 설정대로 (역×요일 bias + 온라인 잔차) 보정을 순서대로 적용한다."""
+    검침 시각이 당겨진 날이나 연휴 다음 날처럼 모든 역이 같이 움직인 날을 개별 역의 이상으로 보지 않게 한다.
+    벗어난 정도는 각 역의 최근 수준(level, 톤) 대비 비율로 재고 위아래 20%를 잘라낸 평균을 쓰므로,
+    한 역의 급증이나 누수가 다른 역의 예측을 끌고 가지 못한다.
+    """
     pp = cfg.get("postprocess", {})
-    out = _apply_valid_station_dow_bias(meta, pred, valid_bias, float(pp.get("valid_station_dow_bias_weight", 0.0)))
-    out = _apply_online_residual_correction(meta, out, float(pp.get("online_residual_alpha", 0.0)),
-                                            float(pp.get("online_residual_clip", 0.0)))
-    return out
-
-
-def _apply_valid_station_dow_bias(meta, pred, valid_bias, weight: float) -> np.ndarray:
-    """valid 의 역×요일 잔차 중앙값을 weight 만큼 예측에 더해 계통오차를 보정한다."""
+    weight = float(pp.get("common_shift_weight", 0.0))
+    min_peers = int(pp.get("common_shift_min_peers", 6))
     pred = np.asarray(pred, dtype=float)
     if weight <= 0:
         return pred.copy()
-    dow = pd.to_datetime(meta["날짜"]).dt.dayofweek
-    station_bias, station_dow_bias, global_bias = valid_bias["station"], valid_bias["station_dow"], valid_bias["global"]
-    adjustment = np.array(
-        [station_dow_bias.get((cid, d), station_bias.get(cid, global_bias)) for cid, d in zip(meta["고객번호"], dow)],
-        dtype=float,
-    )
-    return np.clip(pred + weight * adjustment, 0.0, None)
+    level = np.fmax(np.asarray(level, dtype=float), 1.0)
+    actual = meta[TARGET].to_numpy(dtype=float)
+    relative = np.where(np.isfinite(actual) & (actual >= 0), (actual - pred) / level, np.nan)
+    shift = np.zeros(len(pred))
+    for rows in pd.Series(np.arange(len(pred))).groupby(pd.to_datetime(meta["날짜"]).to_numpy()).groups.values():
+        rows = np.asarray(rows)
+        for position, row in enumerate(rows):
+            others = np.delete(relative[rows], position)
+            others = others[np.isfinite(others)]
+            if len(others) < min_peers:
+                continue   # 견줄 역이 너무 적은 날은 옮기지 않는다
+            common = trim_mean(others, 0.2)
+            noise = 1.2533 * 1.4826 * np.median(np.abs(others - common)) / np.sqrt(len(others))   # 그 평균의 표준오차
+            shift[row] = common ** 3 / (common ** 2 + noise ** 2 + 1e-12)   # 오차 범위 안의 작은 움직임은 줄여서 반영
+    return np.clip(pred + weight * shift * level, 0.0, None)
+
+
+def postprocess_predictions(meta: pd.DataFrame, pred: np.ndarray, level: np.ndarray, cfg: dict) -> np.ndarray:
+    """config postprocess 설정대로 (온라인 잔차 + 같은 날 공통) 보정을 순서대로 적용한다."""
+    pp = cfg.get("postprocess", {})
+    out = _apply_online_residual_correction(meta, pred, float(pp.get("online_residual_alpha", 0.0)),
+                                            float(pp.get("online_residual_clip", 0.0)))
+    return apply_common_shift(meta, out, level, cfg)
 
 
 def _apply_online_residual_correction(meta, pred, alpha: float, clip_value: float) -> np.ndarray:

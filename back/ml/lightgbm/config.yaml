@@ -8,7 +8,7 @@ seed: 42                    # 난수 시드 (재현성 보장: 같은 시드면 
 # ── 입력 데이터 경로 (repository root 기준 상대경로) ──────────────
 data:
   train: data/ml_dataset/train.csv          # 학습 구간 (~2025-06)
-  valid: data/ml_dataset/valid.csv          # 검증 구간 (2025-06~11): 조기종료·임계값 산출
+  valid: data/ml_dataset/valid.csv          # 검증 구간 (2025-06~11): 역별 척도·임계값 산출
   test:  data/ml_dataset/test.csv           # 평가 구간 (2025-12~): 최종 성능 측정
   calendar: data/processed/date_index.csv   # 달력(요일/주말/공휴일/휴무일/징검다리) 피처 소스
   bills:    data/processed/water_bills.csv  # 격월 청구서 → 역별·월별 baseline 피처 소스
@@ -22,6 +22,7 @@ features:
   # 승객수 lag: 며칠 전 총승객수를 피처로 쓸지 (수도사용량이 승객수와 연동됨)
   passenger_lags: [1, 2, 3, 7, 14, 28, 84, 91, 364, 365, 366, 371]
   # 이동통계 창: 최근 N일(관측) 평균/중앙/표준편차/최소/최대 등을 피처로
+  # (7·28·56 은 최근 수준 계산에, usage_lags 의 364~371 은 작년 대비 비율에 쓰므로 빼지 않는다)
   rolling_windows: [2, 3, 5, 7, 10, 14, 21, 28, 56]
 
 # ── 이상탐지 임계값 (RMSE 계산에는 영향 없음, 분류 기준만) ──────────
@@ -30,21 +31,18 @@ anomaly:
   warn_quantile: 0.95       # 주의: |z| 가 상위 5% 이상
   alert_quantile: 0.99      # 경고: |z| 가 상위 1% 이상
 
-# ── 학습 진행 관련 ────────────────────────────────────────────────
-modeling:
-  early_stopping_rounds: 80  # valid 성능이 80라운드 동안 개선 없으면 학습 조기 종료
-
-# ── 예측 후처리 (모두 과거 잔차만 사용 → 누수 없음. 0 으로 끄기 가능) ─
+# ── 예측 후처리 (0 으로 끄기 가능. 그 역 자신의 당일 실측은 어디에도 쓰지 않는다) ─
 postprocess:
-  valid_station_dow_bias_weight: 0.2  # valid 의 역×요일 잔차 중앙값을 이 비율로 예측에 보정 (계통오차 제거)
   online_residual_alpha: 0.02         # 온라인 잔차보정 EWMA 계수 (0=끔). 클수록 최근 실측에 빠르게 적응
   online_residual_clip: 10.0          # 온라인 보정 시 한 번에 반영할 잔차 상한(톤) — 튐 방지
+  common_shift_weight: 0.9            # 같은 날 다른 역들이 예측에서 함께 벗어난 정도를 이 비율로 반영 (검침 시각 변동·연휴)
+  common_shift_min_peers: 6           # 그 날 견줄 다른 역이 이보다 적으면 공통 보정을 하지 않음
 
 # ── LightGBM 하이퍼파라미터 ───────────────────────────────────────
 model:
   device: cpu            # 학습 장치: cuda=GPU. CPU 로 돌리려면 이 줄을 지우거나 cpu 로.
   objective: regression_l1  # 손실함수 L1(MAE) — 이상치에 강함(제곱이 아니라 절대값)
-  n_estimators: 1000      # 부스팅 트리 개수(최대). 조기종료가 있으면 더 일찍 멈출 수 있음
+  n_estimators: 1000      # 부스팅 트리 개수(고정). 조기종료는 구간에 따라 300개에서 멈추기도 해 쓰지 않는다
   learning_rate: 0.025    # 학습률. 작을수록 천천히·안정적으로 학습(트리 수는 늘려야 함)
   num_leaves: 63          # 트리당 최대 잎 개수 — LightGBM 의 주된 복잡도 조절 손잡이
   max_depth: -1           # 트리 최대 깊이. -1=무제한(복잡도는 num_leaves 로 제어)

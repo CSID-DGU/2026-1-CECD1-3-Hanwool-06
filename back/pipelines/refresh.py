@@ -26,7 +26,7 @@ def _read_csv(path):
     return pd.read_csv(path, encoding="utf-8-sig", dtype={"고객번호": str})
 
 
-def build_dataset(output_dir, *, meters, data_root=None, daily_root=None, train_end=None, valid_end=None):
+def build_dataset(output_dir, *, meters, data_root=None, daily_root=None, train_end=None, valid_end=None, test_end=None):
     """Build by customer number, keeping missing ridership distinct from zero."""
     import numpy as np
     import pandas as pd
@@ -77,11 +77,12 @@ def build_dataset(output_dir, *, meters, data_root=None, daily_root=None, train_
     # Preserve established evaluation cutoffs unless explicitly retraining with new boundaries.
     train_end = train_end or str(_read_csv(data_root / "ml_dataset" / "train.csv")["날짜"].max())
     valid_end = valid_end or str(_read_csv(data_root / "ml_dataset" / "valid.csv")["날짜"].max())
-    if train_end >= valid_end:
-        raise ValueError("train_end must precede valid_end")
+    if train_end >= valid_end or test_end and valid_end >= test_end:
+        raise ValueError("train_end must precede valid_end, and valid_end must precede test_end")
+    # test_end only bounds what the model is evaluated on; master keeps every observation for the snapshot.
     splits = {"train": master[master["날짜"] <= train_end],
               "valid": master[(master["날짜"] > train_end) & (master["날짜"] <= valid_end)],
-              "test": master[master["날짜"] > valid_end]}
+              "test": master[(master["날짜"] > valid_end) & (master["날짜"] <= (test_end or master["날짜"].max()))]}
     train_counts = splits["train"].groupby("고객번호").size()
     valid_counts = splits["valid"].groupby("고객번호").size()
     eligible = {key for key in mapping if train_counts.get(key, 0) >= 90 and valid_counts.get(key, 0) >= 14}
@@ -247,7 +248,7 @@ def _run(args):
             dataset_dir = runtime / "dataset"
             active = collector_meters(meters)
             master, riders, withheld, eligible = build_dataset(dataset_dir, meters=active,
-                daily_root=runtime / "daily", train_end=args.train_end, valid_end=args.valid_end)
+                daily_root=runtime / "daily", train_end=args.train_end, valid_end=args.valid_end, test_end=args.test_end)
             if master.empty:
                 raise ValueError("No valid water observations available")
             build_calendar(master, dataset_dir / "calendar.csv")
@@ -302,6 +303,7 @@ def main():
     parser.add_argument("--runtime-dir", type=Path, default=RUNTIME)
     parser.add_argument("--train-end", type=str)
     parser.add_argument("--valid-end", type=str)
+    parser.add_argument("--test-end", type=str, help="last date the model is evaluated on (default: the latest observation)")
     parser.add_argument("--jobs", type=int, default=2)
     args = parser.parse_args()
     if args.all:

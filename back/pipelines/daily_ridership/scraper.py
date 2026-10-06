@@ -130,7 +130,7 @@ def scrape(target_date: date, *, meters=None, out_dir=None, fetcher=None) -> Pat
     for m in meters:
         total = byline.get((m["key역"], m["호선"])) if m["호선"] is not None else bystn.get(m["key역"])
         if total is None:
-            print(f"  ⚠ {m['역명']} API 매칭 실패")
+            print(f"  ⚠ {m['역명']}: 승하차 자료에서 찾지 못함")
             continue
         rows.append({"고객번호": m["고객번호"], "역명": m["역명"], "날짜": iso, "총승객수": int(total)})
 

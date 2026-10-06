@@ -10,6 +10,7 @@
   riders_std_last2days   = 최근 2일 승객수 표준편차
   bill_daily_avg         = 청구서 기반 그 달 일평균 사용량
   station_month_typical  = 그 역이 그 달에 평소 쓰는 양(중앙값)
+  rel_usage_1days_ago    = 1일 전 사용량 ÷ 그 역의 최근 수준(직전 7일 중앙값)
 """
 
 from __future__ import annotations
@@ -49,18 +50,28 @@ def prepare_data(cfg: dict, fit_splits: tuple[str, ...]) -> PreparedData:
     df = _add_history_features(df, cfg)
     df = _add_typical_level_features(df, fit_splits)
     df = _fill_missing(df)
+    df = _add_level_relative_features(df)
 
     categorical_cols = ["고객번호", "사업소명", "역명", "고지서_성명"]
     for col in categorical_cols:
         df[col] = df[col].astype("category")
 
-    exclude = {"split", "날짜", TARGET}
+    # 요일·일유형은 값이 없는 열이고, 승차·하차 구분은 일별 수집 자료에 없어 판정할 때는 항상 비어 있다.
+    exclude = {"split", "날짜", TARGET, "요일", "일유형", "승차총승객수", "하차총승객수"}
     feature_cols = [c for c in df.columns if c not in exclude]
     for col in feature_cols:
         if col not in categorical_cols:
             df[col] = pd.to_numeric(df[col], errors="coerce").replace([np.inf, -np.inf], np.nan)
 
     return PreparedData(df.copy(), feature_cols, categorical_cols)
+
+
+def recent_level(features: pd.DataFrame, days: int = 7) -> np.ndarray:
+    """그 역의 최근 수준(톤, 하한 1): 직전 days 일(관측 기준) 사용량의 중앙값.
+
+    7일은 예측 목표를 나누는 기준으로, 28일은 역끼리 오차를 견줄 때(같은 날 공통 보정·이상 점수) 쓴다.
+    """
+    return np.fmax(features[f"usage_median_last{days}days"].to_numpy(dtype=float), 1.0)
 
 
 def training_mask(df: pd.DataFrame, splits: tuple[str, ...], cfg: dict) -> pd.Series:
@@ -246,6 +257,24 @@ def _add_typical_level_features(df: pd.DataFrame, fit_splits: tuple[str, ...]) -
     out = out.merge(all_month, on="월", how="left")
     out = out.merge(all_weekday, on="요일_숫자", how="left")
     return out
+
+
+def _add_level_relative_features(df: pd.DataFrame) -> pd.DataFrame:
+    """톤 단위 피처를 그 역의 최근 수준으로 나눈 값(rel_*)과 수준끼리의 비율을 함께 준다.
+
+    역마다 사용량 규모가 열 배씩 달라도 '평소의 몇 배'라는 같은 모양으로 배우게 한다.
+    """
+    level = recent_level(df)
+    ton_cols = [c for c in df.columns if (c.startswith("usage_") and not c.endswith("_ratio"))
+                or c in ("bill_daily_avg", "station_month_typical", "station_weekday_typical")]
+    new = {f"rel_{c}": df[c].to_numpy(dtype=float) / level for c in ton_cols}
+    week = df["usage_median_last7days"]
+    for days in (28, 56):   # 최근 1주 수준이 지난 4주·8주 수준의 몇 배인지
+        longer = df[f"usage_median_last{days}days"].fillna(week).to_numpy(dtype=float)
+        new[f"usage_last7_vs_last{days}days_ratio"] = week.to_numpy(dtype=float) / np.maximum(longer, 1.0)
+    last_year = df[["usage_364days_ago", "usage_365days_ago", "usage_366days_ago", "usage_371days_ago"]].median(axis=1)
+    new["usage_last_year_vs_now_ratio"] = last_year.to_numpy(dtype=float) / level
+    return pd.concat([df, pd.DataFrame(new, index=df.index)], axis=1)
 
 
 def _normal_rows(df: pd.DataFrame) -> pd.Series:

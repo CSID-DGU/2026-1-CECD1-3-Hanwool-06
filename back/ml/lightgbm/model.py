@@ -9,20 +9,13 @@ from tqdm.auto import tqdm
 
 
 def _tqdm_callback(total: int, desc: str):
-    """부스팅 라운드 진행률 + 매 라운드 loss(평가지표)를 tqdm 막대에 보여주는 콜백."""
+    """부스팅 라운드 진행률을 tqdm 막대에 보여주는 콜백."""
     bar = tqdm(total=total, desc=desc, leave=False)
 
     def _callback(env: "lgb.callback.CallbackEnv") -> None:
-        """매 부스팅 라운드마다 LightGBM 이 호출 → 막대 1칸 전진 + loss 갱신."""
+        """매 부스팅 라운드마다 LightGBM 이 호출 → 막대 1칸 전진."""
         bar.update(1)
-        # eval_set 이 있으면 (데이터명, 지표명, 값, ...) 리스트가 채워진다 → 막대 오른쪽에 표시
-        if env.evaluation_result_list:
-            loss = ", ".join(
-                f"{eval_name}={value:.4f}"
-                for _, eval_name, value, *_ in env.evaluation_result_list
-            )
-            bar.set_postfix_str(loss)
-        if env.iteration + 1 >= env.end_iteration:   # 조기종료 포함 마지막 라운드면 닫기
+        if env.iteration + 1 >= env.end_iteration:   # 마지막 라운드면 닫기
             bar.close()
 
     return _callback
@@ -43,32 +36,24 @@ class LightGBMForecaster:
         X: pd.DataFrame,
         y: pd.Series,
         categorical_cols: list[str],
-        eval_set: tuple[pd.DataFrame, pd.Series] | None = None,
-        early_stopping_rounds: int | None = None,
+        level: np.ndarray,
         progress_desc: str = "LightGBM 학습",
     ) -> "LightGBMForecaster":
-        """모델을 학습한다.
+        """모델을 학습한다. 목표는 톤이 아니라 '그 역의 최근 수준 대비 비율'(y / level)이다.
 
-        categorical_cols      : 범주형으로 처리할 컬럼(고객번호 등) — LightGBM 이 native 처리
-        eval_set              : 평가셋. 주면 매 라운드 loss 가 tqdm 에 표시되고 조기종료 기준이 됨
-        early_stopping_rounds : 이 라운드만큼 개선 없으면 조기 종료(None 이면 끝까지)
+        categorical_cols : 범주형으로 처리할 컬럼(고객번호 등) — LightGBM 이 native 처리
+        level            : 행마다 그 역의 최근 수준(톤). 가중치로도 쓰므로 비율의 절대오차 합이
+                           톤 단위 절대오차 합과 같아진다(사용량이 큰 역이 묻히지 않는다)
         """
         # 부스팅 라운드 수만큼 진행률 막대 표시 (device=cuda 이면 GPU 에서 학습됨)
         callbacks = [_tqdm_callback(int(self.params.get("n_estimators", 100)), progress_desc)]
-        fit_kwargs = {"categorical_feature": categorical_cols}
-        if eval_set is not None:
-            fit_kwargs["eval_set"] = [eval_set]
-            fit_kwargs["eval_metric"] = "rmse"
-        if early_stopping_rounds:
-            callbacks.append(lgb.early_stopping(early_stopping_rounds, verbose=False))
-        fit_kwargs["callbacks"] = callbacks
-        self.model.fit(X, y, **fit_kwargs)
+        self.model.fit(X, y / level, sample_weight=level, categorical_feature=categorical_cols, callbacks=callbacks)
         return self
 
-    def predict(self, X: pd.DataFrame) -> np.ndarray:
-        """예측값(톤)을 반환. 음수 사용량은 불가능하므로 0 이상으로 자른다(clip)."""
-        pred = np.asarray(self.model.predict(X), dtype=float)
-        return np.clip(pred, 0.0, None)
+    def predict(self, X: pd.DataFrame, level: np.ndarray) -> np.ndarray:
+        """예측값(톤)을 반환. 음수 사용량은 불가능하므로 비율을 0 이상으로 자른 뒤 수준을 곱한다."""
+        ratio = np.asarray(self.model.predict(X), dtype=float)
+        return np.clip(ratio, 0.0, None) * level
 
     def feature_importance(self, feature_names: list[str]) -> pd.DataFrame:
         """피처별 중요도를 내림차순 표로 반환한다(어떤 피처가 예측에 많이 쓰였는지)."""

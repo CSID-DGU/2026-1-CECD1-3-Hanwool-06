@@ -4,7 +4,7 @@
   conda run -n hanul python back/ml/lightgbm/main.py
 
 흐름:
-  [1/2] 검증모델  train -> valid : 조기종료로 라운드 결정 + valid 잔차로 이상탐지 임계값(q95/q99) 확정
+  [1/2] 검증모델  train -> valid : valid 잔차로 역별 척도와 이상탐지 임계값(q95/q99) 확정
   [2/2] 최종모델  train+valid -> test : 재학습 후 후처리 → 이상탐지 → 결과/그림 저장
 
 실제 로직은 dataset.py(피처) · model.py(모델) · metric.py(지표) · utils.py(설정/후처리/그림)에 있다.
@@ -42,7 +42,7 @@ def run(config_path: Path | None = None, out_dir: Path | None = None) -> dict:
     warn_q = float(cfg["anomaly"]["warn_quantile"])    # 주의 분위수 (상위 5%)
     alert_q = float(cfg["anomaly"]["alert_quantile"])  # 경고 분위수 (상위 1%)
 
-    # [1/2] 검증모델: train 으로 학습, valid 로 조기종료 + 임계값 산출
+    # [1/2] 검증모델: train 으로 학습, valid 로 역별 척도와 임계값 산출
     print("[1/2] validation model: train -> valid")
     valid_data = dataset.prepare_data(cfg, fit_splits=("train",))
     train_mask = dataset.training_mask(valid_data.frame, ("train",), cfg)
@@ -53,18 +53,20 @@ def run(config_path: Path | None = None, out_dir: Path | None = None) -> dict:
         raise ValueError("Model requires non-empty train and finite validation observations")
 
     valid_model = LightGBMForecaster(cfg["model"])
-    valid_model.fit(X_train, y_train, valid_data.categorical_cols,
-                    eval_set=(X_valid, y_valid),
-                    early_stopping_rounds=int(cfg["modeling"]["early_stopping_rounds"]))
+    valid_model.fit(X_train, y_train, valid_data.categorical_cols, dataset.recent_level(X_train))
 
     valid_meta = dataset.split_meta(valid_data, "valid")
-    valid_pred = valid_model.predict(X_valid)
+    valid_level = dataset.recent_level(X_valid, 28)   # 역끼리 오차를 견주는 기준: 최근 28일 중앙 사용량
+    # test 예측과 같은 기준으로 잔차를 재도록 valid 예측에도 같은 날 공통 보정을 적용한다
+    valid_pred = utils.apply_common_shift(valid_meta, valid_model.predict(X_valid, dataset.recent_level(X_valid)),
+                                          valid_level, cfg)
     # valid 의 |deviation_score| 분포 q95/q99 를 임계값으로 확정 → test 에도 동일 적용
-    calibration = metric.fit_calibration(valid_meta, valid_pred)
-    valid_scored = metric.score_predictions(valid_meta, valid_pred, calibration)
+    calibration = metric.fit_calibration(valid_meta, valid_pred, valid_level)
+    valid_scored = metric.score_predictions(valid_meta, valid_pred, calibration, valid_level)
     warn_t, alert_t = metric.score_quantiles(valid_scored["deviation_score"], warn_q, alert_q)
-    valid_summary = metric.summarize(metric.classify(valid_scored, warn_t, alert_t))
-    valid_bias = utils.build_valid_bias(valid_meta, valid_pred)
+    valid_rows = (valid_data.frame["split"] == "valid").to_numpy()
+    valid_summary = metric.summarize(metric.classify(valid_scored, warn_t, alert_t),
+                                     metric.ordinary_days(valid_data.frame).to_numpy()[valid_rows])
     print(f"  임계값(|deviation_score|): 주의>={warn_t:.3f} (q{warn_q:g}), 경고>={alert_t:.3f} (q{alert_q:g})")
     print(f"  valid {utils.format_summary(valid_summary)}")
 
@@ -75,22 +77,22 @@ def run(config_path: Path | None = None, out_dir: Path | None = None) -> dict:
     X_final, y_final = dataset.split_xy(final_data, final_mask)
     X_test = dataset.split_features(final_data, "test")
 
-    final_params = dict(cfg["model"])
-    final_params["n_estimators"] = int(valid_model.model.best_iteration_ or cfg["model"]["n_estimators"])
     if X_test.empty:
         raise ValueError("No eligible test observations; snapshot must be withheld")
-    final_model = LightGBMForecaster(final_params)
-    # 조기종료는 없지만 tqdm 에 train loss 가 보이도록 학습셋을 eval 로 넣는다
-    final_model.fit(X_final, y_final, final_data.categorical_cols, eval_set=(X_final, y_final))
+    final_model = LightGBMForecaster(cfg["model"])
+    final_model.fit(X_final, y_final, final_data.categorical_cols, dataset.recent_level(X_final))
 
     test_meta = dataset.split_meta(final_data, "test")
-    test_pred_raw = final_model.predict(X_test)
-    test_pred = utils.postprocess_predictions(test_meta, test_pred_raw, valid_bias, cfg)
+    test_level = dataset.recent_level(X_test, 28)
+    test_pred_raw = final_model.predict(X_test, dataset.recent_level(X_test))
+    test_pred = utils.postprocess_predictions(test_meta, test_pred_raw, test_level, cfg)
     if not np.isfinite(test_pred).all() or len(test_pred) != len(test_meta):
         raise ValueError("Model returned incomplete or non-finite predictions")
-    test_anomalies = metric.classify(metric.score_predictions(test_meta, test_pred, calibration), warn_t, alert_t)
+    test_anomalies = metric.classify(metric.score_predictions(test_meta, test_pred, calibration, test_level),
+                                     warn_t, alert_t)
     test_anomalies.insert(5, "predicted_ton_before_adjust", np.asarray(test_pred_raw, dtype=float).round(3))
-    test_summary = metric.summarize(test_anomalies)
+    test_rows = (final_data.frame["split"] == "test").to_numpy()
+    test_summary = metric.summarize(test_anomalies, metric.ordinary_days(final_data.frame).to_numpy()[test_rows])
     print(f"  test {utils.format_summary(test_summary)}")
 
     # 결과 저장
@@ -99,7 +101,7 @@ def run(config_path: Path | None = None, out_dir: Path | None = None) -> dict:
         "mode": "validation=train->valid, final=train+valid->test",
         "postprocess": cfg.get("postprocess", {}),
         "feature_count": len(final_data.feature_cols),
-        "best_iteration": final_params["n_estimators"],
+        "n_estimators": int(cfg["model"]["n_estimators"]),
         "warn_threshold": warn_t,
         "alert_threshold": alert_t,
         "train_rows_for_valid_model": int(train_mask.sum()),
@@ -113,6 +115,7 @@ def run(config_path: Path | None = None, out_dir: Path | None = None) -> dict:
                    results_dir / "test_anomalies_flagged.csv")
     utils.save_csv(final_model.feature_importance(final_data.feature_cols),
                    results_dir / "feature_importance.csv")
+    utils.save_model(final_model, results_dir / "model.txt")
     if cfg.get("save_plot", True):
         utils.save_scatter_plot(test_anomalies, warn_q, alert_q, results_dir / "test_pred_vs_actual.png")
     print(f"  saved: {results_dir}")

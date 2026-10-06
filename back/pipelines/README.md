@@ -38,6 +38,11 @@ Configure `ARISU_USER_ID`, `ARISU_USER_PWD`, and `SEOUL_PSGR_KEY` in the server 
 or root `.env`. Environment values take priority. Legacy `I121_USER_ID/I121_USER_PWD`
 are accepted only as a credential fallback. No credentials are needed for fixture tests.
 
+The ridership API serves only the most recent week. Older dates come from the Seoul Open
+Data monthly files (OA-12914, no key): `python -m back.pipelines.daily_ridership.monthly
+2026-05 2026-08`. It writes the same per-date files and applies the station/line rule of
+the historical `data/processed/ridership.csv`, so the series continues without a break.
+
 ```sh
 python -m pip install -r back/api/requirements.txt -r back/pipelines/requirements.txt
 python -m back.pipelines.refresh --start 2026-06-01 --end 2026-06-30 --water --ridership
@@ -90,8 +95,9 @@ A contract needs at least 90 training observations and 14 validation observation
 risk publication. New contracts still show observations; `manifest.withheld` records
 why risk is unavailable. Existing train/validation date cutoffs are preserved. After
 reviewing a newer evaluation period, pass `--train-end YYYY-MM-DD --valid-end YYYY-MM-DD`
-to retrain with updated boundaries. Model configuration and result location can also
-be selected with `python -m back.ml.lightgbm.main --config path.yaml --out-dir path`.
+to retrain with updated boundaries. `--test-end YYYY-MM-DD` ends the evaluated period there;
+later observations stay in the snapshot and are simply not scored. Model configuration and
+result location can also be selected with `python -m back.ml.lightgbm.main --config path.yaml --out-dir path`.
 
 The optional, manually dispatched Actions workflow uses a trusted self-hosted runner and persistent
 `APP_DATA_DIR` outside its checkout. Initialize its database and contract registry

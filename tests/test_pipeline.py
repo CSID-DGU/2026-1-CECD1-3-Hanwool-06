@@ -13,7 +13,7 @@ import pandas as pd
 
 from back.pipelines.common import merge_csv
 from back.pipelines.daily_water import scraper as water
-from back.pipelines.daily_ridership import scraper as riders
+from back.pipelines.daily_ridership import monthly, scraper as riders
 from back.scripts.billing_etl import crawl_bills as bills
 from back.scripts.billing_etl.i121_crawler import auth
 from back.ml.lightgbm import metric, dataset
@@ -232,6 +232,26 @@ class PipelineTest(unittest.TestCase):
                                        fetcher=lambda *_: ({}, {})))
         self.assertEqual(path.read_bytes(), previous)
 
+    def test_monthly_ridership_file_fills_days_with_the_reviewed_station_rule(self):
+        source = self.path / 'CARD_SUBWAY_MONTH_202605.csv'
+        source.write_text('\n'.join(['"사용일자","노선명","역명","승차총승객수","하차총승객수","등록일자"',
+            '"20260501","1호선","강동","10","20","20260504",""', '"20260501","중앙선","강동(구청)","100","200","20260504",""',
+            '"20260501","2호선","길동","1","2","20260504",""', '"20260501","5호선","길동","50","60","20260504",""',
+            '"20260502","2호선","길동","3","4","20260505",""']), encoding='utf-8-sig')
+        match = self.path / 'meter_match.csv'
+        match.write_text('고객번호,호선\n000000001,\n000000002,2.0\n', encoding='utf-8-sig')
+        out = self.path / 'ridership'
+        with patch.object(monthly, 'MATCH', match):
+            for _ in range(2):  # importing the same month again changes nothing
+                self.assertEqual(monthly.import_month(source, meters=METERS, out_dir=out), ['2026-05-01', '2026-05-02'])
+        first = {r['고객번호']: r['총승객수'] for r in self.rows(out / '2026-05-01.csv')}
+        self.assertEqual(first, {'000000001': '330', '000000002': '3'})  # whole station vs. its own line
+        self.assertEqual([(r['고객번호'], r['총승객수']) for r in self.rows(out / '2026-05-02.csv')], [('000000002', '7')])
+        self.assertEqual(json.loads((out / '2026-05-02.status.json').read_text())['missing'], ['000000001'])
+        source.write_text(source.read_text(encoding='utf-8-sig').replace('"3","4"', '"-3","4"'), encoding='utf-8-sig')
+        with patch.object(monthly, 'MATCH', match), self.assertRaises(ValueError):
+            monthly.import_month(source, meters=METERS, out_dir=out)
+
     def test_bills_preserve_partial_success_and_supplementary_rows(self):
         def fetch(_session, customer, *_args, **_kwargs):
             if customer.endswith('2'):
@@ -321,7 +341,7 @@ class PipelineTest(unittest.TestCase):
         riders = pd.DataFrame({'고객번호': ['000000001'], '날짜': ['2026-06-01'], '총승객수': [30.]})
         risk = {'000000001': [{'date': '2026-05-31', 'severity': '주의'}]}
         args = Namespace(runtime_dir=self.path, start=date(2026, 6, 1), end=date(2026, 6, 1),
-                         water=True, ridership=False, bills=False, model=False, train_end=None, valid_end=None, jobs=1)
+                         water=True, ridership=False, bills=False, model=False, train_end=None, valid_end=None, test_end=None, jobs=1)
         with patch('back.api.catalog.collector_meters', return_value=METERS), \
              patch('back.api.catalog.data_sources', return_value=({}, risk)), \
              patch.object(water, 'scrape_range', return_value=[]), \
@@ -351,6 +371,14 @@ class PipelineTest(unittest.TestCase):
         new = master[master['고객번호'] == '000000002'].iloc[0]
         self.assertEqual(new['역명'], '길동역')
         self.assertTrue(pd.isna(new['총승객수']))
+        # An evaluation cut-off shortens only the test split; later observations stay in master.
+        capped, *_ = build_dataset(self.path / 'output', meters=METERS, data_root=self.path,
+            daily_root=self.path / 'daily', train_end=dates[89], valid_end=dates[103], test_end=dates[106])
+        self.assertEqual(capped['날짜'].max(), dates[-1])
+        self.assertEqual(self.rows(self.path / 'output/test.csv')[-1]['날짜'], dates[106])
+        with self.assertRaises(ValueError):
+            build_dataset(self.path / 'output', meters=METERS, data_root=self.path, daily_root=self.path / 'daily',
+                          train_end=dates[89], valid_end=dates[103], test_end=dates[103])
 
 
 if __name__ == '__main__':
