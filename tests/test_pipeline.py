@@ -371,6 +371,10 @@ class PipelineTest(unittest.TestCase):
         new = master[master['고객번호'] == '000000002'].iloc[0]
         self.assertEqual(new['역명'], '길동역')
         self.assertTrue(pd.isna(new['총승객수']))
+        # Without explicit boundaries the previous runtime split is kept, so daily reruns use the same model split.
+        build_dataset(self.path / 'output', meters=METERS, data_root=self.path, daily_root=self.path / 'daily')
+        self.assertEqual(self.rows(self.path / 'output/train.csv')[-1]['날짜'], dates[89])
+        self.assertEqual(self.rows(self.path / 'output/valid.csv')[-1]['날짜'], dates[103])
         # An evaluation cut-off shortens only the test split; later observations stay in master.
         capped, *_ = build_dataset(self.path / 'output', meters=METERS, data_root=self.path,
             daily_root=self.path / 'daily', train_end=dates[89], valid_end=dates[103], test_end=dates[106])

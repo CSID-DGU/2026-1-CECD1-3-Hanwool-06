@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { buildStations, latestDate, kdate, ton, won, detailHref, signedPct, CHART_COLORS, SEVERITY_TONE } from "./data.js";
 import { Card, EmptyNote, Stat } from "./ui";
 import LineChart from "./LineChart";
+import RiskCalendar from "./RiskCalendar";
 import Bill from "./Bill";
 import { exportUrl } from "../../api.js";
 import FileLink from "../../components/FileLink.jsx";
@@ -46,7 +47,7 @@ export default function DetailPage({ data, hash, collection }) {
       {line.dataMode === "daily"
         ? <DailyPanel key={line.meterId} usage={line.daily} ridership={line.ridership} latest={latest} />
         : <Card title="일일 사용량"><EmptyNote>아직 수집된 일일 사용량이 없습니다. 첫 자료가 들어오면 여기에 표시됩니다.</EmptyNote></Card>}
-      {line.dataMode === "daily" && (line.risk ? <RiskPanel line={line} /> : <Card title="위험도"><EmptyNote>아직 위험도 분석 결과가 없습니다.</EmptyNote></Card>)}
+      {line.dataMode === "daily" && (line.risk ? <RiskPanel key={line.meterId} line={line} /> : <Card title="위험도"><EmptyNote>아직 위험도 분석 결과가 없습니다.</EmptyNote></Card>)}
     </div>}
     <Card title="청구서">
       <Bill key={line.meterId} station={viewStation} line={line} />
@@ -75,40 +76,27 @@ function StationHeader({ station, line, selectMeter }) {
   </section>;
 }
 
+// 위험도: 달력에서 고른 날(처음에는 마지막 판정일)의 수치를 보여 준다.
 function RiskPanel({ line }) {
   const rk = line.risk;
-  const msg = rk.severity === "정상"
-    ? "사용량이 예측 범위 안에 있습니다."
-    : `예측보다 ${ton(Math.abs(rk.error))}톤(${signedPct(rk.pct, "비율 없음")}) ${rk.방향 === "과다" ? "많이" : "적게"} 썼습니다.`;
+  const [selected, setSelected] = useState(rk.기준일);
+  const day = rk.days.find((d) => d.date === selected) || rk.days.at(-1);
+  const msg = day.err
+    ? "이 날 관측값에 오류가 있어 판정하지 못했습니다."
+    : day.severity === "정상"
+      ? "사용량이 예측 범위 안에 있습니다."
+      : `예측보다 ${ton(Math.abs(day.error))}톤(${signedPct(day.pct, "비율 없음")}) ${day.방향 === "과다" ? "많이" : "적게"} 썼습니다.`;
   return (
-    <Card title="위험도" right={`${kdate(rk.기준일)} 기준`}>
-      <p className="dt-risk-head"><RiskBadge risk={SEVERITY_TONE[rk.severity] || "unknown"} /> {msg}</p>
+    <Card title="위험도" right={`${kdate(day.date)} 기준`}>
+      <p className="dt-risk-head"><RiskBadge risk={SEVERITY_TONE[day.severity] || "unknown"} /> {msg}</p>
       <dl className="dt-risk-stats">
-        <Stat label="예측" value={`${ton(rk.predicted)} 톤`} />
-        <Stat label="실제" value={`${ton(rk.actual)} 톤`} />
-        <Stat label="오차" value={`${rk.error > 0 ? "+" : ""}${ton(rk.error)} 톤`} />
-        <Stat label="예측 대비" value={signedPct(rk.pct, "비율 없음")} />
+        <Stat label="예측" value={`${ton(day.predicted)} 톤`} />
+        <Stat label="실제" value={`${ton(day.actual)} 톤`} />
+        <Stat label="오차" value={`${day.error > 0 ? "+" : ""}${ton(day.error)} 톤`} />
+        <Stat label="예측 대비" value={signedPct(day.pct, "비율 없음")} />
       </dl>
-      <table className="data-table">
-        <caption className="sr-only">최근 위험도 이력</caption>
-        <thead>
-          <tr>
-            <th>날짜</th>
-            <th>위험도</th>
-            <th className="num">예측 대비</th>
-          </tr>
-        </thead>
-        <tbody>
-          {[...rk.history].reverse().map((h) => (
-            <tr key={h.date}>
-              <td>{kdate(h.date)}</td>
-              <td><RiskBadge risk={SEVERITY_TONE[h.severity] || "unknown"} /></td>
-              <td className="num">{signedPct(h.pct)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <p className="form-hint">위험도는 예측 오차를 이 계량기의 평소 변동 폭과 비교해 정합니다.</p>
+      <RiskCalendar days={rk.days} selected={day.date} onSelect={setSelected} />
+      <p className="form-hint">달력에서 날짜를 누르면 그날 수치를 봅니다. 위험도는 예측 오차를 이 계량기의 최근 사용량과 평소 변동 폭에 견줘 정합니다.</p>
     </Card>
   );
 }

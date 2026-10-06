@@ -74,9 +74,11 @@ def build_dataset(output_dir, *, meters, data_root=None, daily_root=None, train_
     master["요일"] = dt.dt.weekday.map(dict(enumerate("월화수목금토일")))
     master["일유형"] = pd.NA
     master = master.sort_values(["고객번호", "날짜"]).reset_index(drop=True)
-    # Preserve established evaluation cutoffs unless explicitly retraining with new boundaries.
-    train_end = train_end or str(_read_csv(data_root / "ml_dataset" / "train.csv")["날짜"].max())
-    valid_end = valid_end or str(_read_csv(data_root / "ml_dataset" / "valid.csv")["날짜"].max())
+    # Preserve established evaluation cutoffs unless explicitly retraining with new boundaries:
+    # the previous runtime split if there is one, else the fixed dataset in the repository.
+    previous = output_dir if (output_dir / "valid.csv").exists() else data_root / "ml_dataset"
+    train_end = train_end or str(_read_csv(previous / "train.csv")["날짜"].max())
+    valid_end = valid_end or str(_read_csv(previous / "valid.csv")["날짜"].max())
     if train_end >= valid_end or test_end and valid_end >= test_end:
         raise ValueError("train_end must precede valid_end, and valid_end must precede test_end")
     # test_end only bounds what the model is evaluated on; master keeps every observation for the snapshot.

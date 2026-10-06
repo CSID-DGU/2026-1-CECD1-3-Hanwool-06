@@ -24,8 +24,31 @@ export function buildRisk(arr = []) {
     predicted: last.pred, actual: last.actual, error: last.residual, pct: pct(last),
     방향: last.dir || (last.residual >= 0 ? "과다" : "과소"), severity: last.severity,
     기준일: last.date, latestError: Boolean(all.at(-1)?.err),
-    history: clean.slice(-5).map((r) => ({ date: r.date, severity: r.severity, pct: pct(r) })),
+    // 판정된 모든 날. 관측 오류가 있던 날은 '자료 확인'으로 둔다.
+    days: all.map((r) => ({
+      date: r.date, err: Boolean(r.err), severity: r.err ? "자료 확인" : r.severity,
+      predicted: r.pred, actual: r.actual, error: r.residual, pct: r.err ? null : pct(r),
+      방향: r.dir || (r.residual >= 0 ? "과다" : "과소"),
+    })),
   };
+}
+
+// 달력 한 달치 칸. 일요일 시작이라 1일 앞은 빈칸(null)이고, 판정이 없는 날은 severity 가 없다.
+export function monthCells(ym, days = []) {
+  const [year, month] = ym.split("-").map(Number);
+  const byDate = new Map(days.map((d) => [d.date, d]));
+  const cells = Array.from({ length: new Date(year, month - 1, 1).getDay() }, () => null);
+  for (let day = 1, count = new Date(year, month, 0).getDate(); day <= count; day += 1) {
+    const date = `${ym}-${String(day).padStart(2, "0")}`;
+    cells.push({ date, day, ...(byDate.get(date) || {}) });
+  }
+  return cells;
+}
+export const monthOf = (iso) => String(iso).slice(0, 7);
+export function shiftMonth(ym, delta) {
+  const [year, month] = ym.split("-").map(Number);
+  const moved = new Date(year, month - 1 + delta, 1);
+  return `${moved.getFullYear()}-${String(moved.getMonth() + 1).padStart(2, "0")}`;
 }
 
 // Every registered contract is retained, even before the first bill or collection.

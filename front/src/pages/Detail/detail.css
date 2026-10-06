@@ -28,6 +28,26 @@
 .dt-stat dt { color: var(--mute); font-size: 12px; }
 .dt-stat dd { margin: 2px 0 0; font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
 
+/* 날짜별 위험도 달력: 정상은 색 없음, 주의·경고만 바탕색 */
+.dt-cal-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.dt-cal-head strong { font-size: 15px; }
+.dt-cal-head .secondary-button { padding: 2px 10px; font-size: 13px; }
+.dt-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.dt-cal-dow { padding: 2px 0; color: var(--mute); font-size: 12px; text-align: center; }
+.dt-cal-day { height: 36px; border: 1px solid var(--rule-soft); border-radius: var(--radius); background: var(--paper); color: var(--ink); font: inherit; font-size: 13px; font-variant-numeric: tabular-nums; cursor: pointer; }
+.dt-cal-day.is-warn { border-color: #ecd3a6; background: var(--warn-bg); color: #6b3d00; font-weight: 600; }
+.dt-cal-day.is-alert { border-color: #efc4c4; background: var(--alert-bg); color: #8f1d1d; font-weight: 600; }
+.dt-cal-day.is-unknown { border-style: dashed; color: var(--mute); }
+.dt-cal-day.is-empty { border-color: transparent; color: var(--mute); cursor: default; }
+.dt-cal-day[aria-pressed="true"] { outline: 2px solid var(--brand); outline-offset: -2px; }
+.dt-cal-day:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+.dt-cal-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 8px 0 0; color: var(--sub); font-size: 12px; }
+.dt-cal-legend span::before { content: ""; display: inline-block; width: 12px; height: 12px; margin-right: 5px; border: 1px solid var(--rule); border-radius: 2px; background: var(--paper); vertical-align: -2px; }
+.dt-cal-legend .is-warn::before { border-color: #ecd3a6; background: var(--warn-bg); }
+.dt-cal-legend .is-alert::before { border-color: #efc4c4; background: var(--alert-bg); }
+.dt-cal-legend .is-unknown::before { border-style: dashed; }
+.dt-cal-legend .is-empty::before { border-color: transparent; background: var(--ground); }
+
 .dt-date { display: inline-flex; align-items: center; gap: 8px; }
 .dt-date input { height: 30px; padding: 0 8px; border: 1px solid var(--rule); border-radius: var(--radius); background: var(--paper); font-size: 13px; }
 .dt-daily-sub + .dt-daily-sub { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--rule-soft); }

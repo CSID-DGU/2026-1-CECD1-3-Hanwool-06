@@ -72,6 +72,7 @@ class ModelDataTest(unittest.TestCase):
             tmp = Path(tmp)
             parts = {'train': frame['날짜'] <= '2025-04-30', 'test': frame['날짜'] > '2025-05-20'}
             parts['valid'] = ~parts['train'] & ~parts['test']
+            frame.loc[frame['날짜'] >= '2025-06-01', '총승객수'] = np.nan   # ridership not collected yet for the newest days
             for name, rows in parts.items():
                 frame[rows].to_csv(tmp / f'{name}.csv', index=False)
             build_calendar(frame, tmp / 'calendar.csv')
@@ -87,7 +88,13 @@ class ModelDataTest(unittest.TestCase):
             self.assertEqual(len(anomalies), metrics['test']['n_samples'])
             self.assertTrue(np.isfinite(anomalies[['predicted_ton', 'deviation_score']].to_numpy()).all())
             self.assertLess(metrics['test']['mae'], 0.5 * anomalies['일사용량_톤'].mean())
-            self.assertTrue((tmp / 'out' / 'model.txt').read_text().startswith('tree'))
+            # days without ridership are judged by the spare model, and judged no worse than roughly the rest
+            spare = anomalies['날짜'] >= '2025-06-01'
+            self.assertTrue(anomalies.loc[spare, 'without_ridership'].all() and not anomalies.loc[~spare, 'without_ridership'].any())
+            self.assertEqual(metrics['test_rows_without_ridership'], int(spare.sum()))
+            self.assertLess((anomalies.loc[spare, '일사용량_톤'] - anomalies.loc[spare, 'predicted_ton']).abs().mean(), 0.5 * anomalies['일사용량_톤'].mean())
+            for name in ('model.txt', 'model_without_ridership.txt'):
+                self.assertTrue((tmp / 'out' / name).read_text().startswith('tree'))
 
     def test_bill_baseline_preserves_missing_usage_and_counts_distinct_months(self):
         labels = pd.DataFrame([{'고객번호': '000000001', '역명': '가역'}])

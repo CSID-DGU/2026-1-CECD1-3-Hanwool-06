@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { billGroundwater, billLabel, billNoticeNumber, billUsage, billWindow, buildRisk, buildStations, chartRange, detailHref, latestDate, signedPct } from "../src/pages/Detail/data.js";
+import { billGroundwater, billLabel, billNoticeNumber, billUsage, billWindow, buildRisk, buildStations, chartRange, detailHref, latestDate, monthCells, shiftMonth, signedPct } from "../src/pages/Detail/data.js";
 import { buildDashboard, buildMapGroups } from "../src/pages/Dashboard/dashboardData.js";
 import { deleteMeter, exportUrl, getData, getMeters, request, restoreMeter, saveCollectionSettings, setCsrfToken, startCollection } from "../src/api.js";
 import { collectionNeedsRefresh, collectionTime, isCollectionActive, meterCollectionState } from "../src/collection.js";
@@ -48,6 +48,17 @@ test("out-of-order risk is sorted and recent error / missing data never becomes 
   const { stations } = buildDashboard({ meters: [{ id: "a", customer_number: "a", station_id: "s", station_name: "역", line: 1, active: true }], daily: { a: { usage: [{ date: "2026-06-01", value: 12 }] } }, risk: { a: [invalid, valid] }, status: { reference_date: "2026-06-02" } });
   assert.equal(stations[0].risk, "unknown");
   assert.equal(buildRisk([{ ...valid, pred: 0 }]).pct, null);
+  assert.deepEqual(risk.days.map((d) => d.severity), ["정상", "자료 확인"]);
+});
+
+test("risk calendar starts on Sunday, keeps days without a judgement blank and moves across years", () => {
+  const cells = monthCells("2026-09", [{ date: "2026-09-01", severity: "정상" }, { date: "2026-09-30", severity: "경고" }]);
+  assert.equal(cells.filter((c) => c === null).length, 2);   // 2026-09-01 is a Tuesday
+  const days = cells.filter(Boolean);
+  assert.equal(days.length, 30);
+  assert.deepEqual([days[0].severity, days[1].severity, days.at(-1).severity], ["정상", undefined, "경고"]);
+  assert.equal(shiftMonth("2026-12", 1), "2027-01");
+  assert.equal(shiftMonth("2026-01", -1), "2025-12");
 });
 
 test("billing-only, first collection and analysis waiting stay outside risk classifications", () => {
