@@ -142,11 +142,13 @@ button.line-badge[aria-pressed="false"] { background: var(--paper); box-shadow: 
 .head-summary strong { color: var(--ink); font-weight: 600; }
 .head-summary .is-alert { color: var(--alert); }
 .head-summary .is-warn { color: var(--warn); }
-.data-dates { display: flex; align-items: baseline; gap: 12px; color: var(--mute); font-size: 13px; }
-.data-dates dl { display: flex; flex-wrap: wrap; margin: 0; }
-.data-dates dl > div { display: flex; gap: 6px; padding: 0 12px; border-left: 1px solid var(--rule); }
-.data-dates dl > div:last-child { padding-right: 0; }
-.data-dates dd { margin: 0; color: var(--ink); font-variant-numeric: tabular-nums; }
+/* 파일 준비 안내: 서버가 엑셀·PDF를 만드는 동안 가운데에 띄운다 */
+.download-notice { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; background: rgba(27, 31, 39, 0.35); }
+.download-notice > div { display: flex; flex-direction: column; align-items: center; gap: 10px; min-width: 280px; max-width: calc(100vw - 32px); padding: 24px 28px; border: 1px solid var(--rule); border-radius: var(--radius); background: var(--paper); font-size: 15px; font-weight: 600; text-align: center; }
+.download-notice small { color: var(--sub); font-size: 13px; font-weight: 400; }
+.spinner { width: 28px; height: 28px; border: 3px solid var(--rule); border-top-color: var(--brand); border-radius: 50%; animation: spin 0.9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation: none; border-top-color: var(--brand); } }
 
 .view-tabs, .management-tabs { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; border-bottom: 1px solid var(--rule); }
 .view-tabs button, .management-tabs button { margin-bottom: -1px; padding: 8px 14px; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--sub); font-size: 15px; font-weight: 600; }
@@ -225,8 +227,6 @@ button.line-badge[aria-pressed="false"] { background: var(--paper); box-shadow: 
   h1 { font-size: 20px; }
   .brand strong { display: none; }
   .account-actions { gap: 12px; }
-  .data-dates { flex-direction: column; gap: 4px; }
-  .data-dates dl > div:first-child { padding-left: 0; border-left: 0; }
   .filter-search { max-width: none; flex-basis: 100%; }
   .filter-reset { margin-left: 0; }
   .form-grid { grid-template-columns: 1fr; }

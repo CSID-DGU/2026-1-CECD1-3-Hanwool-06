@@ -109,6 +109,8 @@ def _collect(meter, session, notify):
     state_path = runtime / "collection" / f"{cid}.json"
     state = json.loads(state_path.read_text()) if state_path.exists() else {}
     checked = state.get("water_checked", {})
+    # Days the source itself reports as missing or invalid; reported once, then rechecked quietly with the month.
+    known_issues = set(state.get("water_excluded", []))
     old_daily, risk = catalog.data_sources()
     old_entry = old_daily.get(cid, {"usage": [], "ridership": []})
     observations = {r["date"]: r["value"] for r in old_entry.get("usage", [])} if daily_enabled else {}
@@ -123,9 +125,17 @@ def _collect(meter, session, notify):
     fresh, errors = {}, []
     allowed = getattr(session, 'arisu_customer_numbers', None)
     login_error = getattr(session, 'arisu_login_error', None)
+    notes = []
     if daily_enabled and isinstance(allowed, frozenset) and cid not in allowed:
-        errors.append('일일 사용량: 아리수 계정 설정 또는 로그인을 확인해 주세요' if isinstance(login_error, str)
-                      else '일일 사용량: 현재 아리수 계정에 등록되지 않아 조회하지 못했습니다. 청구서는 별도로 조회합니다')
+        if isinstance(login_error, str):
+            errors.append('일일 사용량: 아리수 계정 설정 또는 로그인을 확인해 주세요')
+        else:
+            # The account cannot read this customer's daily meter: keep bills only instead of failing every day.
+            with db.connect() as conn:
+                conn.execute("UPDATE meters SET daily_enabled=0,updated_at=? WHERE id=?", (db.now(), meter["id"]))
+                db.audit(conn, None, "meter_daily_disabled", meter["id"], {"reason": "아리수 계정에 등록되지 않은 고객번호"})
+            notes.append('일일 사용량: 아리수 계정에 등록되지 않은 고객번호라 일일 관제에서 제외하고 청구서만 수집합니다. '
+                         '계정에 등록한 뒤 계량기 관리에서 다시 켜세요')
         months = []
     else:
         months = water_months(observations, end, checked) if daily_enabled else []
@@ -143,11 +153,11 @@ def _collect(meter, session, notify):
                     raise ValueError("Invalid customer or usage")
                 merge_csv(runtime / "daily" / "water" / f"{observed}.csv", [row], FIELDS, ["고객번호", "사용일"])
                 fresh[str(observed)] = value
-            if issues:
-                checked.pop(month, None)
-                errors.append(f"{', '.join(issues)} 아리수 검침값 누락·오류로 해당 관측을 제외했습니다")
-            else:
-                checked[month] = str(today())
+            new_issues = [day for day in issues if day not in known_issues]
+            known_issues.update(issues)
+            if new_issues:
+                errors.append(f"{', '.join(new_issues)} 아리수 검침값 누락·오류로 해당 관측을 제외했습니다")
+            checked[month] = str(today())
         except CustomerAccessError:
             errors.append("일일 사용량: 현재 아리수 계정으로 조회할 수 없습니다. 청구서는 별도로 조회합니다")
             break
@@ -223,8 +233,10 @@ def _collect(meter, session, notify):
         except Exception as exc:
             logger.error("Incremental snapshot publication failed (%s)", type(exc).__name__)
             errors.append("일일 자료의 화면 반영에 실패했습니다")
+    known_issues -= set(fresh)   # a day the source has since corrected is an ordinary observation again
     try:
-        write_json(state_path, {"water_checked": checked, "bill_retry_from": None, "bill_retry_windows": failed_windows, "updated_at": db.now()})
+        write_json(state_path, {"water_checked": checked, "water_excluded": sorted(known_issues), "bill_retry_from": None,
+                                "bill_retry_windows": failed_windows, "updated_at": db.now()})
     except OSError as exc:
         logger.error("Collection checkpoint write failed (%s)", type(exc).__name__)
         errors.append("수집 상태 저장에 실패했습니다")
@@ -237,4 +249,6 @@ def _collect(meter, session, notify):
                    else f"청구 전용 계량기: 청구 내역 {len(bills)}건을 확인했습니다.")
     else:
         message = "조회된 자료가 없습니다. 이 기간에 자료가 없거나, 이 계정으로 볼 수 없는 고객번호일 수 있습니다."
+    if notes:
+        message = "; ".join(notes) + ". " + message
     return _result(status, message, len(fresh), len(bills), bool(observations), valid)

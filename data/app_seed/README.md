@@ -6,6 +6,9 @@ They must not be copied to Vite public assets or a public static download direct
 
 - `bills.json`, `stations.json`: original 368-contract application data, moved out of `front/public`.
 - `locations.json`: 75 original meter coordinates; bootstrap groups them by physical station.
+- `station_positions.json`: map positions (percent of the map image) for the other 155 stations, read off
+  `front/public/metro_map_rectangle.png` with OCR plus marker detection and checked by eye. Applied on every
+  start to stations whose position is still empty, so positions edited in the admin screen are kept.
 - `details_long.csv`: user-provided historical detailed billing data from the previous `withus` project.
   It augments existing bills by customer, billing month and bill type, preserving existing-only history.
   Rows without a detailed payment amount remain present with null amounts and

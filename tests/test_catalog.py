@@ -26,6 +26,7 @@ class CatalogCheck(unittest.TestCase):
             "000000002": {"역명": "가역2", "호선": 2, "영업사업소": "나사업소"},
         }, ensure_ascii=False))
         self.seed.joinpath("locations.json").write_text('{"000000001":{"x":20,"y":30}}')
+        self.seed.joinpath("station_positions.json").write_text('{"가역":{"x":99,"y":99},"나역":{"x":40,"y":50}}')
         self.patch = patch.multiple(config, ROOT=self.root, SEED_DIR=self.seed,
                                     DATA_DIR=self.root / "runtime", APP_DB_PATH=self.root / "app.sqlite3")
         self.patch.start()
@@ -55,8 +56,12 @@ class CatalogCheck(unittest.TestCase):
         (version.parent.parent / "manifest.json").write_text('{"published":true,"directory":"versions/check"}')
         with db.connect() as conn:
             conn.execute("UPDATE meters SET purpose='직원용' WHERE id='000000001'")
+            conn.execute("INSERT INTO stations(id,name) VALUES('나역','나역')")
             catalog.bootstrap(conn)
             self.assertEqual(len(catalog.list_meters(conn)), 2)
+            # the station seed only fills empty positions: 가역 keeps its original coordinates, 나역 gets the seed's
+            positions = {r["id"]: (r["map_x"], r["map_y"]) for r in conn.execute("SELECT id,map_x,map_y FROM stations")}
+            self.assertEqual((positions["가역"], positions["나역"]), ((20, 30), (40, 50)))
         data = catalog.payload(["가사업소"])
         self.assertEqual(set(data["bills"]), {"000000001"})
         self.assertEqual(data["status"]["latest_usage"], "2026-05-01")

@@ -37,7 +37,7 @@ export default function Dashboard({ data, collection }) {
   const switchView = (next) => { setView(next); setSelectedRisk("all"); };
   const exportParams = { office_id: selectedOffice, line: selectedLine };
   return <main className="app-shell">
-    <PageHeader status={data.status || {}} daily={monitored.length} alerts={monitored.filter((s) => s.risk === "alert").length} warnings={monitored.filter((s) => s.risk === "warn").length} />
+    <PageHeader daily={monitored.length} alerts={monitored.filter((s) => s.risk === "alert").length} warnings={monitored.filter((s) => s.risk === "warn").length} />
     <CollectionPanel collection={collection} meters={data.meters || []} />
     <div className="view-tabs" role="group" aria-label="제공 자료 종류">
       <button type="button" aria-pressed={!billingOnly} onClick={() => switchView("daily")} title="일일 사용량을 수집하는 계량기">일일 관제 <span>{dailyStations.length}</span></button>

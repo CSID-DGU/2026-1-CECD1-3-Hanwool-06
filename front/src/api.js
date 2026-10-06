@@ -2,7 +2,35 @@
 let csrfToken = "";
 export const setCsrfToken = (token = "") => { csrfToken = token; };
 
+// 저장된 화면(한 파일로 묶은 정적 HTML)에서는 서버 대신 파일 안에 압축해 둔 자료로 답한다. 바꾸는 요청은 모두 거절한다.
+const packed = typeof window !== "undefined" ? window.__STATIC_DATA_GZ__ : undefined;
+export const isStatic = Boolean(packed);
+const staticReady = isStatic ? unpack(packed) : null;
+async function unpack(text) {
+  const bytes = Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
+  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
+  return JSON.parse(await new Response(stream).text());
+}
+function refuse(message, status) {
+  const error = new Error(message);
+  error.status = status;
+  throw error;
+}
+async function staticRequest(path, method) {
+  const data = await staticReady;
+  if (method !== "GET") refuse("저장된 화면이라 바꿀 수 없습니다.", 405);
+  const [route, query = ""] = path.split("?");
+  if (route === "/health") return { ok: true, setup_required: false };
+  if (route === "/auth/me") return { user: { id: 0, email: "", name: "저장된 화면", role: "superadmin", active: true, must_change_password: false, office_ids: [] }, csrf_token: "static" };
+  if (route === "/data") return new URLSearchParams(query).get("version") === data.version ? null : data;
+  if (route === "/meters") return data.meters;
+  if (route === "/users") return [];
+  if (route === "/collection") return { settings: { enabled: false }, configured: { water: false, bills: false }, worker_enabled: false, running: null, latest: null, history: [], meters: [] };
+  return refuse("저장된 화면에서는 제공하지 않습니다.", 404);
+}
+
 export async function request(path, { method = "GET", body, responseType = "json", ...options } = {}) {
+  if (isStatic) return staticRequest(path, method);
   const response = await fetch(`/api${path}`, {
     ...options, method, credentials: "same-origin", cache: "no-store",
     headers: {

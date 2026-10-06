@@ -511,8 +511,15 @@ def alert(body: Analyze, user=Depends(auth.current_user)):
     return {**result, 'item': item}
 
 
+def mark_download(response: Response, token: str | None) -> Response:
+    """화면이 '파일 준비 중' 안내를 내릴 수 있도록, 요청에 딸려 온 표식을 응답 쿠키로 돌려준다."""
+    if token and re.fullmatch(r'[A-Za-z0-9_-]{1,32}', token):
+        response.set_cookie(f'dl_{token}', '1', max_age=60, path='/', samesite='lax', secure=config.COOKIE_SECURE, httponly=False)
+    return response
+
+
 @app.get('/api/bills/{bill_id}/pdf')
-def bill_pdf(bill_id: str, download: bool = False, user=Depends(auth.current_user)):
+def bill_pdf(bill_id: str, download: bool = False, dl: str | None = None, user=Depends(auth.current_user)):
     with db.connect() as c:
         bill = c.execute('SELECT * FROM bills WHERE id=?', (bill_id,)).fetchone()
         # A bill outside the caller's scope is indistinguishable from a missing one.
@@ -522,8 +529,8 @@ def bill_pdf(bill_id: str, download: bool = False, user=Depends(auth.current_use
     payload = json.loads(bill['payload']) | {'id': bill['id'], 'source': bill['source'], 'gubun': bill['gubun'], 'notice_number': bill['notice_number']}
     suffix = '_' + bill['notice_number'] if bill['notice_number'] else ''
     name = f"{meter['display_name']}_{bill['period']}_{bill['gubun']}{suffix}.pdf"
-    return Response(documents.bill_pdf(meter, payload), media_type='application/pdf',
-                    headers={'Content-Disposition': f"{'attachment' if download else 'inline'}; filename=water-bill.pdf; filename*=UTF-8''{quote(name, safe='')}"})
+    return mark_download(Response(documents.bill_pdf(meter, payload), media_type='application/pdf',
+                                  headers={'Content-Disposition': f"{'attachment' if download else 'inline'}; filename=water-bill.pdf; filename*=UTF-8''{quote(name, safe='')}"}), dl)
 
 
 def export_rows(user, kind, start=None, end=None, office_id=None, line=None, meter_id=None):
@@ -552,14 +559,15 @@ def export_rows(user, kind, start=None, end=None, office_id=None, line=None, met
             else:
                 for b in c.execute('SELECT * FROM bills WHERE meter_id=? AND period>=? AND period<=? ORDER BY period,gubun', (m['id'], start[:7], end[:7])):
                     payload = json.loads(b['payload']) | {'source': b['source']}
-                    rows.append(meta | {'청구월': b['period'], '청구구분': b['gubun'], '고지번호': b['notice_number'], **{k: payload.get(k) for k in ('사용량', '지하수사용량', '총사용량', '납부금액', '부과금액', '총사용금액', '차감금액', '상수도_기본료', '상수도_사용료', '하수도_사용료', '물이용부담금', '계량기대금', '설치비', '연체금', '수납상태', '납부방법', '납기일', 'periodStart', 'periodEnd', 'summary_only', 'detail_available')}, '집계사용량_톤': catalog.bill_usage(payload), '출처': b['source']})
+                    # 실무자가 보는 열만 둔다: 수집 출처·내부 표식(summary_only 등)·집계값은 빼고 원문 항목만 쓴다.
+                    rows.append(meta | {'청구월': b['period'], '청구구분': b['gubun'], '고지번호': b['notice_number'], **{k: payload.get(k) for k in ('사용량', '지하수사용량', '총사용량', '납부금액', '부과금액', '총사용금액', '차감금액', '상수도_기본료', '상수도_사용료', '하수도_사용료', '물이용부담금', '계량기대금', '설치비', '연체금', '수납상태', '납부방법', '납기일')}})
     return rows
 
 
 @app.get('/api/export.xlsx')
-def export(kind: str = 'usage', start: str | None = None, end: str | None = None, office_id: str | None = None, line: str | None = None, meter_id: str | None = None, user=Depends(auth.current_user)):
+def export(kind: str = 'usage', start: str | None = None, end: str | None = None, office_id: str | None = None, line: str | None = None, meter_id: str | None = None, dl: str | None = None, user=Depends(auth.current_user)):
     rows = export_rows(user, kind, start, end, office_id, line, meter_id)
-    return Response(documents.export_xlsx(rows), media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', headers={'Content-Disposition': f'attachment; filename=water-{kind}.xlsx'})
+    return mark_download(Response(documents.export_xlsx(rows), media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', headers={'Content-Disposition': f'attachment; filename=water-{kind}.xlsx'}), dl)
 
 
 @app.get('/api/stats')

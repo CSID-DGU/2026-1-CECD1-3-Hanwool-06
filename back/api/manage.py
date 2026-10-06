@@ -3,7 +3,7 @@ import argparse
 import getpass
 import sqlite3
 from pathlib import Path
-from . import auth, config, db
+from . import auth, config, db, static_page
 
 
 def main():
@@ -11,6 +11,7 @@ def main():
     commands = parser.add_subparsers(dest='command', required=True)
     commands.add_parser('backup').add_argument('destination', type=Path)
     commands.add_parser('reset-password').add_argument('email')
+    commands.add_parser('export-static', help='로그인 없이 열어 보는 한 파일짜리 화면 저장본').add_argument('destination', type=Path)
     args = parser.parse_args()
     if not config.APP_DB_PATH.is_file():
         parser.error('운영 DB가 없습니다. API를 먼저 실행하세요.')
@@ -23,6 +24,13 @@ def main():
             source.backup(destination)
         target.chmod(0o600)
         print(f'백업 완료: {target}')
+        return
+    if args.command == 'export-static':
+        try:
+            target = static_page.build(args.destination.expanduser().resolve())
+        except FileNotFoundError as error:
+            parser.error(str(error))
+        print(f'저장했습니다: {target} ({target.stat().st_size / 1e6:.1f}MB). 자료가 통째로 들어 있으니 공개된 곳에 두지 마세요.')
         return
     with db.connect() as c:
         row = c.execute('SELECT id FROM users WHERE email=?', (args.email.strip().lower(),)).fetchone()

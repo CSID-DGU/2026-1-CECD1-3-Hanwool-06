@@ -119,6 +119,10 @@ def bootstrap(conn):
             conn.execute('UPDATE meters SET metadata=?,daily_enabled=? WHERE id=?',
                          (json.dumps(metadata, ensure_ascii=False), int(row['daily_enabled']), meter['id']))
         conn.execute("INSERT INTO settings(key,value) VALUES('catalog_collection_v1',?)", (db.now(),))
+    # Map positions read off the official map image fill stations that still have none; admin edits are kept.
+    for name, pos in _json(config.SEED_DIR / "station_positions.json", {}).items():
+        conn.execute("UPDATE stations SET map_x=COALESCE(map_x,?),map_y=COALESCE(map_y,?) WHERE id=? AND map_x IS NULL",
+                     (pos["x"], pos["y"], name))
 
 
 def list_meters(conn, office_ids=None, include_deleted=False):

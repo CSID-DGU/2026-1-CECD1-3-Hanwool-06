@@ -78,6 +78,8 @@ Claude.md
 
 # Private runtime: users, sessions, collected files, model outputs and snapshots
 /data/runtime/
+# 자료가 통째로 들어간 정적 화면 저장본
+/front/dist-static/
 *.sqlite3-wal
 *.sqlite3-shm
 /test-results/

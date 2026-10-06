@@ -13,14 +13,14 @@ export default function AppHeader({ logo, user, hash, refreshing, onRefresh, onL
         {tab("#/detail", "역 상세", hash.startsWith("#/detail"))}
         {tab("#/statistics", "통계", hash.startsWith("#/statistics"))}
         {tab("#/meters", "계량기 관리", hash.startsWith("#/meters"))}
-        {user.role === "superadmin" && tab("#/users", "사용자 관리", hash.startsWith("#/users"))}
+        {user.role === "superadmin" && onLogout && tab("#/users", "사용자 관리", hash.startsWith("#/users"))}
       </nav>
-      <div className="account-actions">
+      {onLogout ? <div className="account-actions">
         <button type="button" onClick={onSummary}>업무 요약</button>
         <button type="button" onClick={onRefresh} disabled={refreshing}>{refreshing ? "확인 중…" : "새로고침"}</button>
         <a href="#/account" title={user.email}>{user.name} <span>{user.role === "superadmin" ? "총괄" : "사업소"}</span></a>
         <button type="button" onClick={onLogout}>로그아웃</button>
-      </div>
+      </div> : <div className="account-actions"><span>저장된 화면</span></div>}
     </header>
   );
 }

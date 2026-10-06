@@ -142,12 +142,23 @@ class IncrementalTest(unittest.TestCase):
         session = Mock(arisu_customer_numbers=frozenset({'000000002'}))
         with patch.object(inc, 'fetch_month') as water, patch.object(inc, 'collect_bills', return_value={'rows': [self.bill()], 'errors': []}):
             result = inc.collect_meter(self.meter, session=session)
-        self.assertEqual(result['status'], 'partial')
-        self.assertIn('일일 사용량', result['message'])
+        # an unregistered customer leaves daily monitoring instead of failing on every run; bills keep coming
+        self.assertEqual(result['status'], 'success')
+        self.assertIn('일일 관제에서 제외', result['message'])
         self.assertEqual(result['bill_rows'], 1)
         water.assert_not_called()
         with db.connect() as conn:
             self.assertEqual(conn.execute('SELECT COUNT(*) FROM bills').fetchone()[0], 1)
+            self.assertEqual(conn.execute("SELECT daily_enabled FROM meters WHERE id='meter'").fetchone()[0], 0)
+            self.assertEqual(conn.execute("SELECT action FROM audit_log ORDER BY id DESC LIMIT 1").fetchone()[0], 'meter_daily_disabled')
+        login_failed = Mock(arisu_customer_numbers=frozenset(), arisu_login_error='login')
+        with db.connect() as conn:
+            conn.execute('UPDATE meters SET daily_enabled=1')
+        with patch.object(inc, 'fetch_month'), patch.object(inc, 'collect_bills', return_value={'rows': [self.bill()], 'errors': []}):
+            result = inc.collect_meter(self.meter, session=login_failed)
+        self.assertEqual(result['status'], 'partial')   # a login problem is not a reason to drop the meter
+        with db.connect() as conn:
+            self.assertEqual(conn.execute("SELECT daily_enabled FROM meters WHERE id='meter'").fetchone()[0], 1)
 
     def test_billing_gap_windows_do_not_recrawl_fifteen_stored_years(self):
         with db.connect() as conn:
@@ -223,6 +234,19 @@ class IncrementalTest(unittest.TestCase):
         self.assertEqual(result['daily_rows'], 1)
         self.assertIn('2026-06-02 아리수 검침값 누락', result['message'])
         self.assertEqual(catalog.data_sources()[0]['000000001']['usage'], [{'date': '2026-06-01', 'value': 3186.0}])
+        state = json.loads((config.DATA_DIR / 'collection/000000001.json').read_text())
+        self.assertEqual(state['water_excluded'], ['2026-06-02'])
+        # the same source gap is remembered: the next run is not reported as a partial failure again
+        with patch.object(inc, 'fetch_month', side_effect=fetch), patch.object(inc, 'collect_bills', return_value={'rows': [], 'errors': []}):
+            again = inc.collect_meter(self.meter)
+        self.assertNotIn('누락', again['message'])
+        self.assertNotEqual(again['status'], 'partial')
+        # once the source supplies the day, it is an ordinary observation and the memory is cleared
+        def fixed(_session, _meter, month, *, issues, **kwargs):
+            return [self.row(value=3186), self.row(day='2026-06-02', value=12)] if month == '2026-06' else []
+        with patch.object(inc, 'fetch_month', side_effect=fixed), patch.object(inc, 'collect_bills', return_value={'rows': [], 'errors': []}):
+            inc.collect_meter(self.meter)
+        self.assertEqual(json.loads((config.DATA_DIR / 'collection/000000001.json').read_text())['water_excluded'], [])
 
     def test_remote_default_customer_is_not_accepted_for_another_customer(self):
         session = Mock()

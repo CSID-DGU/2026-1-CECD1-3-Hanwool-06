@@ -7,7 +7,7 @@ import SummaryPopup from "./components/SummaryPopup.jsx";
 import { useCollection } from "./components/CollectionPanel.jsx";
 import { LoginPage, PasswordPage } from "./components/AuthPanels.jsx";
 import AppHeader from "./pages/Dashboard/components/AppHeader.jsx";
-import { getData, getHealth, getMe, logout, setCsrfToken } from "./api.js";
+import { getData, getHealth, getMe, isStatic, logout, setCsrfToken } from "./api.js";
 import logo from "./assets/seoulmetro.svg";
 import "./pages/Detail/detail.css";
 
@@ -81,7 +81,8 @@ export default function App() {
 
   return <>
     <a className="skip-link" href="#main-content" onClick={(e) => { e.preventDefault(); document.getElementById("main-content")?.focus(); }}>본문으로 이동</a>
-    <AppHeader logo={logo} user={session} hash={hash} refreshing={refreshing} onRefresh={refresh} onLogout={signOut} onSummary={() => setSummaryOpen(true)} />
+    <AppHeader logo={logo} user={session} hash={hash} refreshing={refreshing} onRefresh={refresh}
+      onLogout={isStatic ? undefined : signOut} onSummary={isStatic ? undefined : () => setSummaryOpen(true)} />
     {error && <div className="app-error" role="alert">{error} <button onClick={refresh}>다시 시도</button></div>}
     <div id="main-content" tabIndex={-1}>
       {session.must_change_password || hash.startsWith("#/account") ? <PasswordPage user={session} onChanged={() => establish()} />
