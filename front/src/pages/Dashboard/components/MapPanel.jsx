@@ -59,7 +59,7 @@ export default function MapPanel({ stationMap, locations, billingOnly = false, c
       <button type="button" onClick={fit}>전체 보기</button>
     </div>}>노선도</SectionTitle>
     <div ref={viewport} className="metro-viewport" tabIndex={0} aria-label="노선도. 확대한 뒤 스크롤하거나 끌어서 옮길 수 있습니다." onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={() => { drag.current = null; }} onPointerCancel={() => { drag.current = null; }}>
-      <svg className="metro-canvas" viewBox="0 0 2551 2123" style={{ width: `${zoom * 100}%` }} role="group" aria-label="서울 지하철 노선도와 계량기가 있는 역">
+      <svg className="metro-canvas" viewBox="0 0 2551 2123" style={{ width: `${zoom * 100}%`, height: `${zoom * 100}%` }} role="group" aria-label="서울 지하철 노선도와 계량기가 있는 역">
         <image href="/metro_map_rectangle.png" width="2551" height="2123" aria-hidden="true" />
         {mapped.map((station) => {
           const x = station.position.x * 25.51, y = station.position.y * 21.23;

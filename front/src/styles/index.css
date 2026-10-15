@@ -182,6 +182,7 @@ button.line-badge[aria-pressed="false"] { background: var(--paper); box-shadow: 
 .risk-filter button span { margin-left: 5px; color: var(--mute); font-weight: 400; font-variant-numeric: tabular-nums; }
 .risk-filter .risk-alert { color: var(--alert); }
 .risk-filter .risk-warn { color: var(--warn); }
+.risk-filter .risk-ok { color: var(--ok); }
 .risk-filter button[aria-pressed="true"] { border-color: var(--ink); background: var(--ink); color: #fff; }
 .risk-filter button[aria-pressed="true"] span { color: #d5d9e0; }
 .filter-reset { align-self: center; margin-left: auto; }
@@ -192,9 +193,9 @@ button.line-badge[aria-pressed="false"] { background: var(--paper); box-shadow: 
 .zoom-controls { display: flex; align-items: center; gap: 4px; }
 .zoom-controls button { min-width: 28px; height: 28px; padding: 0 8px; border: 1px solid var(--rule); border-radius: var(--radius); background: var(--paper); font-size: 13px; }
 .zoom-controls span { min-width: 40px; color: var(--sub); font-size: 12px; text-align: center; font-variant-numeric: tabular-nums; }
-.metro-viewport { max-height: 600px; overflow: auto; border: 1px solid var(--rule); border-radius: var(--radius); background: var(--paper); cursor: grab; overscroll-behavior: contain; }
+.metro-viewport { aspect-ratio: 2551 / 2123; overflow: auto; border: 1px solid var(--rule); border-radius: var(--radius); background: var(--paper); cursor: grab; overscroll-behavior: contain; }
 .metro-viewport:active { cursor: grabbing; }
-.metro-canvas { display: block; max-width: none; height: auto; user-select: none; }
+.metro-canvas { display: block; max-width: none; user-select: none; }
 .metro-node { cursor: pointer; }
 .metro-node-hit { fill: transparent; }
 .metro-node-dot { fill: #6e7a8c; stroke: #fff; stroke-width: 5; }
@@ -249,7 +250,6 @@ button.line-badge[aria-pressed="false"] { background: var(--paper); box-shadow: 
   .filter-search { max-width: none; flex-basis: 100%; }
   .filter-reset { margin-left: 0; }
   .form-grid { grid-template-columns: 1fr; }
-  .metro-viewport { max-height: 420px; }
   .map-legend > span:last-child { margin-left: 0; }
 }
 @media (prefers-reduced-motion: reduce) {
