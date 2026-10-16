@@ -7,12 +7,15 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
-from . import auth, catalog, config, db
+from . import auth, catalog, config, db, mailer
 
 KST = ZoneInfo('Asia/Seoul')
 # Fixed daily run; COLLECTION_WORKER_ENABLED=false pauses it. Old 'collection_schedule' rows are ignored.
 DAILY_HOUR = 8
+# Network failures in that run are retried twice, 30 minutes apart; what still fails is mailed to superadmins once.
+RETRY_LIMIT, RETRY_DELAY = 2, timedelta(minutes=30)
 ACTIVE = ('queued', 'running')
+FAILED = ('failed', 'partial', 'interrupted', 'configuration_required')
 logger = logging.getLogger(__name__)
 
 
@@ -112,22 +115,66 @@ def status(user):
 
 
 def schedule_due(c, current=None):
+    """Queue the daily run and its retries; returns the failure mail to send once the day's run has settled."""
     current = current or datetime.now(KST)
     day = current.date().isoformat()
+    if current.hour < DAILY_HOUR or c.execute("SELECT 1 FROM collection_jobs WHERE status IN ('queued','running')").fetchone():
+        return None
     last = c.execute("SELECT value FROM settings WHERE key='collection_auto_day'").fetchone()
-    if current.hour < DAILY_HOUR or (last and last[0] == day):
-        return
-    if c.execute("SELECT 1 FROM collection_jobs WHERE status IN ('queued','running')").fetchone():
-        return
-    ids = [m['id'] for m in catalog.list_meters(c) if m['active'] and m['provider'] == 'arisu']
-    if ids:
-        enqueue(c, ids, 'automatic')
-        c.execute("INSERT INTO settings VALUES('collection_auto_day',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (day,))
+    if not last or last[0] != day:
+        ids = [m['id'] for m in catalog.list_meters(c) if m['active'] and m['provider'] == 'arisu']
+        if ids:
+            enqueue(c, ids, 'automatic')
+            c.execute("INSERT INTO settings VALUES('collection_auto_day',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (day,))
+        return None
+    settled = c.execute("SELECT value FROM settings WHERE key='collection_auto_settled'").fetchone()
+    if settled and settled[0] == day:
+        return None
+    meters = {m['id']: m for m in catalog.list_meters(c) if m['active'] and m['provider'] == 'arisu'}
+    # Today's run is the latest automatic job and the retries queued after it.
+    start = c.execute("SELECT max(id) FROM collection_jobs WHERE trigger='automatic'").fetchone()[0]
+    jobs = c.execute("SELECT id,trigger,finished_at FROM collection_jobs WHERE id>=? AND trigger IN ('automatic','automatic_retry')", (start,)).fetchall()
+    marks = ','.join('?' for _ in jobs)
+    # Each meter's latest result counts, including a manual update after the automatic run.
+    latest = c.execute(f'SELECT i.* FROM collection_items i JOIN (SELECT meter_id,max(job_id) job_id FROM collection_items '
+                       f'WHERE meter_id IN (SELECT meter_id FROM collection_items WHERE job_id IN ({marks})) GROUP BY meter_id) '
+                       'USING(meter_id,job_id) ORDER BY meter_id', [j['id'] for j in jobs]).fetchall()
+    failed = [r for r in latest if r['status'] in FAILED and r['meter_id'] in meters]
+    retry = [r['meter_id'] for r in failed if r['status'] == 'interrupted' or r['retryable']]
+    retries = sum(j['trigger'] == 'automatic_retry' for j in jobs)
+    # A login rejected by any job since then stops retries too: each retry job would log in again.
+    rejected = c.execute("SELECT 1 FROM settings WHERE key='collection_login_rejected' AND CAST(value AS INTEGER)>=?", (start,)).fetchone()
+    if retry and retries < RETRY_LIMIT and not rejected:
+        finished = max((j['finished_at'] for j in jobs if j['finished_at']), default=None)
+        if not finished or current >= datetime.fromisoformat(finished) + RETRY_DELAY:
+            enqueue(c, retry, 'automatic_retry')
+        return None
+    # The refresh timer waits for this mark before retraining on the day's data.
+    c.execute("INSERT INTO settings VALUES('collection_auto_settled',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (day,))
+    if not failed:
+        return None
+    recipients = [r[0] for r in c.execute("SELECT email FROM users WHERE role='superadmin' AND active=1 ORDER BY id")]
+    return {'day': day, 'retries': retries, 'recipients': recipients,
+            'items': [dict(r) | {k: meters[r['meter_id']][k] for k in ('display_name', 'customer_number')} for r in failed]}
+
+
+def send_alert(alert):
+    """Called after the queue transaction commits, so a slow mail server never holds the queue lock."""
+    try:
+        result = mailer.send_mail(f"[수집 실패] 아리수 자동 수집 {len(alert['items'])}곳 확인 필요 ({alert['day']})",
+                                  mailer.build_collection_alert_html(alert), ','.join(alert['recipients']))
+    except Exception as exc:   # e.g. an address smtplib cannot encode; collection goes on
+        result = {'sent': False, 'reason': type(exc).__name__}
+    if not result['sent']:
+        logger.warning('Collection failure mail was not sent (%s)', result.get('reason', ''))
+    with db.connect() as c:
+        db.audit(c, None, 'collection_alert_sent' if result['sent'] else 'collection_alert_failed', alert['day'],
+                 {'meters': len(alert['items'])} | ({} if result['sent'] else {'reason': result.get('reason', '')}))
 
 
 def run_job(job_id, stop):
     from back.pipelines.incremental import collect_meter
-    from back.scripts.billing_etl.i121_crawler.auth import collection_session
+    from back.scripts.billing_etl.i121_crawler.auth import collection_session, transient
     session = None
 
     def collect_shared(meter, progress):
@@ -139,6 +186,10 @@ def run_job(job_id, stop):
                 result = failure_result(exc)
                 logger.error('Collection session setup failed for job %s (%s)', job_id, type(exc).__name__)
                 return result | {'setup_failed': True}
+            login_error = getattr(session, 'arisu_login_error', None)
+            if isinstance(login_error, str) and not transient(login_error):
+                with db.connect() as c:
+                    c.execute("INSERT INTO settings VALUES('collection_login_rejected',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(job_id),))
         return collect_meter(meter, progress=progress, session=session)
     try:
         _run_job(job_id, stop, collect_shared)
@@ -149,7 +200,7 @@ def run_job(job_id, stop):
 
 def failure_result(exc):
     from requests.exceptions import ConnectionError, HTTPError, Timeout
-    from back.scripts.billing_etl.i121_crawler.auth import ConfigurationError, LoginError
+    from back.scripts.billing_etl.i121_crawler.auth import ConfigurationError, LoginError, transient
     status = 'failed'
     if isinstance(exc, ConfigurationError):
         status, message = 'configuration_required', '서버에 아리수 아이디와 비밀번호를 설정해야 합니다.'
@@ -171,7 +222,7 @@ def failure_result(exc):
         message = '아리수 서버에 연결하지 못했습니다. 서버의 네트워크 연결을 확인하세요.'
     else:
         message = '수집 처리에 실패했습니다. 서버 기록을 확인하세요.'
-    return {'status': status, 'message': message + ' 기존 자료는 보존됩니다.'}
+    return {'status': status, 'message': message + ' 기존 자료는 보존됩니다.', 'retryable': transient(exc)}
 
 
 def _run_job(job_id, stop, collect_meter):
@@ -203,12 +254,13 @@ def _run_job(job_id, stop, collect_meter):
             with db.connect() as c:
                 c.execute('BEGIN IMMEDIATE')
                 c.execute("UPDATE collection_items SET status='skipped',message='삭제 또는 비활성화되어 수집에서 제외했습니다.',finished_at=? WHERE job_id=? AND status='queued' AND meter_id NOT IN (SELECT id FROM meters WHERE active=1 AND deleted_at IS NULL AND provider='arisu')", (db.now(), job_id))
-                c.execute("UPDATE collection_items SET status=?,message=?,started_at=COALESCE(started_at,?),finished_at=? WHERE job_id=? AND status IN ('queued','running')",
-                          (result['status'], '아리수 연결 단계에서 중단했습니다. ' + result['message'], db.now(), db.now(), job_id))
+                c.execute("UPDATE collection_items SET status=?,message=?,retryable=?,started_at=COALESCE(started_at,?),finished_at=? WHERE job_id=? AND status IN ('queued','running')",
+                          (result['status'], '아리수 연결 단계에서 중단했습니다. ' + result['message'], int(result.get('retryable', False)), db.now(), db.now(), job_id))
             break
         with db.connect() as c:
-            c.execute('UPDATE collection_items SET status=?,message=?,finished_at=?,daily_rows=?,bill_rows=?,connection_verified=? WHERE job_id=? AND meter_id=?',
-                      (result['status'], result['message'], db.now(), result.get('daily_rows', 0), result.get('bill_rows', 0), int(result.get('connection_verified', False)), job_id, meter_id))
+            c.execute('UPDATE collection_items SET status=?,message=?,finished_at=?,daily_rows=?,bill_rows=?,connection_verified=?,retryable=? WHERE job_id=? AND meter_id=?',
+                      (result['status'], result['message'], db.now(), result.get('daily_rows', 0), result.get('bill_rows', 0), int(result.get('connection_verified', False)),
+                       int(result.get('retryable', False)), job_id, meter_id))
     with db.connect() as c:
         items = list(c.execute('SELECT status FROM collection_items WHERE job_id=?', (job_id,)))
         state = 'interrupted' if stop.is_set() else outcome(items)
@@ -238,11 +290,13 @@ def worker(stop):
                     message = '이전 수집 중 서버가 중지되었습니다. 다시 시도하세요.' if first_pass else '수집 처리 오류입니다. 다시 시도하세요.'
                     c.execute("UPDATE collection_items SET status=?,message=?,finished_at=? WHERE job_id IN (SELECT id FROM collection_jobs WHERE status='running') AND status IN ('queued','running')", (state, message, db.now()))
                     c.execute("UPDATE collection_jobs SET status=?,finished_at=? WHERE status='running'", (state, db.now()))
-                    schedule_due(c)
+                    alert = schedule_due(c)
                     row = c.execute("SELECT id FROM collection_jobs WHERE status='queued' ORDER BY id LIMIT 1").fetchone()
                     if row:
                         c.execute("UPDATE collection_jobs SET status='running',started_at=? WHERE id=?", (db.now(), row[0]))
                 first_pass = False
+                if alert:
+                    send_alert(alert)
                 if row:
                     run_job(row[0], stop)
                     continue

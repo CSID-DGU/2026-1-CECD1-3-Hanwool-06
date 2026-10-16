@@ -12,7 +12,11 @@ The explicit range CLI uses `daily_enabled` for daily water/ridership collection
 Other providers remain visible in the catalog but are not sent to Arisu.
 
 The web server owns the daily schedule (fixed at 08:00 Asia/Seoul), persisted jobs, and
-manual updates. To pause collection, set `COLLECTION_WORKER_ENABLED=false` on the server
+manual updates. Meters that failed on a network error (timeout, connection, HTTP 429/5xx) or
+were interrupted are retried twice, 30 minutes apart; a rejected login is never retried because
+each retry logs in again. When the day's run settles (`collection_auto_settled` in `settings`),
+active superadmins get one mail listing what still failed.
+To pause collection, set `COLLECTION_WORKER_ENABLED=false` on the server
 and restart it; queued jobs wait until it is enabled again. Registration/restoration queues a
 connection check automatically. A job shares one authenticated Arisu session across
 its meters. Empty results are not proof of an invalid customer number. Source records

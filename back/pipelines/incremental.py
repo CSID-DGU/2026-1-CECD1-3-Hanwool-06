@@ -12,7 +12,7 @@ from back.pipelines.common import collection_lock, customer_number, merge_csv, t
 from back.pipelines.daily_water.scraper import FIELDS, fetch_month
 from back.pipelines.refresh import publish_data
 from back.scripts.billing_etl.crawl_bills import collect_bills
-from back.scripts.billing_etl.i121_crawler.auth import ConfigurationError, CustomerAccessError, LoginError, collection_session
+from back.scripts.billing_etl.i121_crawler.auth import ConfigurationError, CustomerAccessError, LoginError, collection_session, transient
 from back.scripts.billing_etl.i121_crawler.fetch import shift_month
 
 logger = logging.getLogger(__name__)
@@ -63,9 +63,9 @@ def _bill_windows(meter_id, end, retries=()):
     return list(reversed(merged))
 
 
-def _result(status, message, daily_rows=0, bill_rows=0, daily_available=False, verified=False):
+def _result(status, message, daily_rows=0, bill_rows=0, daily_available=False, verified=False, retryable=False):
     return {"status": status, "message": message, "daily_rows": daily_rows, "bill_rows": bill_rows,
-            "daily_available": daily_available, "connection_verified": verified}
+            "daily_available": daily_available, "connection_verified": verified, "retryable": retryable}
 
 
 def collect_meter(meter, *, progress=None, session=None):
@@ -91,7 +91,7 @@ def collect_meter(meter, *, progress=None, session=None):
             return _result("failed", "아리수 로그인에 실패했습니다. 서버 계정과 접근 권한을 확인해 주세요.")
         except Exception as exc:
             logger.warning("Arisu session setup failed (%s)", type(exc).__name__)
-            return _result("failed", "아리수에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.")
+            return _result("failed", "아리수에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.", retryable=transient(exc))
         try:
             return _collect(meter | {"customer_number": cid}, session, notify)
         except Exception as exc:
@@ -125,12 +125,16 @@ def _collect(meter, session, notify):
     fresh, errors = {}, []
     allowed = getattr(session, 'arisu_customer_numbers', None)
     login_error = getattr(session, 'arisu_login_error', None)
+    # Network errors are retried the same morning; a login lost to one leaves the whole session without account
+    # pages, so every failure on it is. A rejected login never is: each retry logs in again and could lock the account.
+    login_rejected = isinstance(login_error, str) and not transient(login_error)
+    retry = isinstance(login_error, str) and not login_rejected
     notes = []
     # Consecutive usable customer lists that did not contain this customer.
     unlisted = 0 if isinstance(allowed, frozenset) and cid in allowed else state.get("unlisted_runs", 0)
     if daily_enabled and isinstance(allowed, frozenset) and cid not in allowed:
         if isinstance(login_error, str):
-            errors.append('일일 사용량: 아리수 계정 설정 또는 로그인을 확인해 주세요')
+            errors.append('일일 사용량: 아리수 계정 설정 또는 로그인을 확인해 주세요' if login_rejected else '일일 사용량: 아리수 서버에 연결하지 못했습니다')
         elif not allowed:
             # An empty list is a failed lookup, not proof that every customer left the account.
             errors.append('일일 사용량: 아리수에서 고객 목록을 받지 못해 이번에는 조회하지 않았습니다')
@@ -177,6 +181,7 @@ def _collect(meter, session, notify):
         except Exception as exc:
             logger.warning("Water query %s failed (%s)", month, type(exc).__name__)
             errors.append(f"{month} 일일 사용량 조회에 실패했습니다")
+            retry = retry or transient(exc)
     notify("청구서를 조회하는 중입니다.")
     bills = []
     bill_end = today().strftime('%Y-%m')
@@ -208,6 +213,7 @@ def _collect(meter, session, notify):
             if any(e.get('error') == 'PublicCustomerNameError' for e in report['errors']):
                 break
         if failures:
+            retry = retry or any(transient(str(e.get('error'))) for e in failures)
             error_types = {e.get('error') for e in failures}
             if error_types & {'CustomerAccessError', 'PublicCustomerNameError'}:
                 errors.append('청구서: 고객번호와 고지서상 성명을 확인해 주세요')
@@ -220,6 +226,7 @@ def _collect(meter, session, notify):
     except Exception as exc:
         logger.warning("Bill collection failed (%s)", type(exc).__name__)
         errors.append("청구 내역 조회에 실패했습니다")
+        retry = retry or transient(exc)
     notify("수집한 자료를 저장하는 중입니다.")
     if bills:
         try:
@@ -261,4 +268,5 @@ def _collect(meter, session, notify):
         message = "조회된 자료가 없습니다. 이 기간에 자료가 없거나, 이 계정으로 볼 수 없는 고객번호일 수 있습니다."
     if notes:
         message = "; ".join(notes) + ". " + message
-    return _result(status, message, len(fresh), len(bills), bool(observations), valid)
+    return _result(status, message, len(fresh), len(bills), bool(observations), valid,
+                   retryable=bool(errors) and retry and not login_rejected)

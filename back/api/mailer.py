@@ -1,4 +1,4 @@
-"""Explicit user-triggered alerts to assigned office managers only."""
+"""User-triggered alerts to assigned office managers, and the daily collection failure notice to superadmins."""
 import smtplib
 import ssl
 from email.mime.text import MIMEText
@@ -36,3 +36,18 @@ def build_alert_html(item):
         ('기준일', item.get('날짜')), ('심각도', item.get('심각도')), ('실제 사용량(톤)', item.get('actual_ton')),
         ('예측 사용량(톤)', item.get('predicted_ton')), ('예측 대비(%)', item.get('pct'))])
     return f'<html><body><h2>상수도 이상징후 확인 요청</h2><table>{rows}</table><p>관제 화면에서 담당자가 보낸 알림입니다. 원인은 현장에서 확인해야 합니다.</p></body></html>'
+
+
+def build_collection_alert_html(alert):
+    labels = {'failed': '실패', 'partial': '일부 실패', 'interrupted': '중단', 'configuration_required': '설정 필요'}
+    causes = {}
+    for item in alert['items']:
+        causes.setdefault((labels.get(item['status'], item['status']), item['message']), []).append(
+            f"{item['display_name']}({item['customer_number']})")
+    rows = ''.join(f'<tr><th>{escape(label)} {len(names)}곳</th><td>{escape(message)}<br>{escape(", ".join(names))}</td></tr>'
+                   for (label, message), names in causes.items())
+    retried = f'과 30분 간격 재시도 {alert["retries"]}번' if alert['retries'] else ''
+    return (f'<html><body><h2>아리수 자동 수집 실패</h2><p>{escape(alert["day"])} 08:00 자동 수집{retried}이 끝났지만 '
+            f'아래 {len(alert["items"])}곳은 자료를 다 받지 못했습니다. 받은 자료와 기존 자료는 그대로이고, 빠진 날짜는 다음 수집 때 다시 조회합니다. '
+            '급하면 관제 화면의 정보 업데이트로 바로 다시 수집할 수 있습니다. 로그인·설정·자료 오류는 계정 잠김을 막으려고 자동으로 다시 시도하지 않습니다.</p>'
+            f'<table>{rows}</table></body></html>')

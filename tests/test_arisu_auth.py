@@ -33,6 +33,12 @@ class CurrentArisuTest(unittest.TestCase):
             with self.assertRaises(auth.CustomerAccessError):
                 auth.ensure_customer_access(session, '000000001')
 
+    def test_every_server_error_is_retried_then_reported_as_transient(self):
+        retries = auth._new_session().get_adapter('https://i121.seoul.go.kr').max_retries
+        self.assertTrue({429, 500, 501, 503, 507, 599} <= set(retries.status_forcelist))
+        self.assertTrue(all(auth.transient(name) for name in ('RetryError', 'ReadTimeout', 'ConnectTimeout', 'ConnectionError')))
+        self.assertFalse(any(auth.transient(name) for name in ('LoginError', 'ConfigurationError', 'CustomerAccessError', 'HTTPError', 'ValueError')))
+
     def test_login_sends_current_fields_csrf_and_preserves_password(self):
         session = Mock(headers={})
         session.get.side_effect = [page(token('before') + '<input name="mbrId"><input name="pwd">'),

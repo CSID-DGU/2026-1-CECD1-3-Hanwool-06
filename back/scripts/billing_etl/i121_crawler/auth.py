@@ -35,9 +35,27 @@ def ensure_customer_access(session, customer):
         raise CustomerAccessError('Customer is not registered in this Arisu account')
 
 
+# Network trouble that can clear by itself. Unlike a rejected login, retrying it cannot lock the account.
+TRANSIENT_ERRORS = (requests.Timeout, requests.ConnectionError, requests.exceptions.RetryError,
+                    requests.exceptions.ChunkedEncodingError, TimeoutError, ConnectionError)
+TRANSIENT_NAMES = frozenset({'Timeout', 'ConnectTimeout', 'ReadTimeout', 'ConnectionError', 'SSLError', 'ProxyError',
+                             'RetryError', 'ChunkedEncodingError', 'TimeoutError'})
+
+
+def transient(error):
+    """An exception, or the class name a collection report recorded for one."""
+    if isinstance(error, str):
+        return error in TRANSIENT_NAMES
+    if isinstance(error, requests.HTTPError):
+        code = error.response.status_code if error.response is not None else 0
+        return code == 429 or code >= 500
+    return isinstance(error, TRANSIENT_ERRORS)
+
+
 def _new_session() -> requests.Session:
     s = requests.Session()
-    retries = Retry(total=3, backoff_factor=1, status_forcelist=(429, 500, 502, 503, 504),
+    # Every 5xx ends as RetryError, which collection reports record and retry later the same morning.
+    retries = Retry(total=3, backoff_factor=1, status_forcelist=(429, *range(500, 600)),
                     allowed_methods={"GET", "POST"})
     s.mount("https://", HTTPAdapter(max_retries=retries))
     s.headers.update(

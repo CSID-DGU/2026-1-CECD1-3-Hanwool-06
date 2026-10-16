@@ -95,6 +95,7 @@ class IncrementalTest(unittest.TestCase):
         self.assertEqual(result['status'], 'partial')
         self.assertEqual(result['daily_rows'], 1)
         self.assertTrue(result['connection_verified'])
+        self.assertTrue(result['retryable'])
         self.assertEqual(catalog.data_sources()[0]['000000001']['usage'][0]['date'], '2026-05-31')
 
     def test_configuration_and_login_failures_are_distinct(self):
@@ -105,6 +106,34 @@ class IncrementalTest(unittest.TestCase):
             self.assertEqual(result['status'], status)
             self.assertIn(message, result['message'])
             self.assertFalse(result['connection_verified'])
+            self.assertFalse(result['retryable'])
+
+    def test_only_network_failures_are_retryable_and_rejected_login_blocks_retry(self):
+        timeout = {'rows': [], 'errors': [{'start': '2026-05', 'error': 'ReadTimeout'}]}
+        name = {'rows': [], 'errors': [{'start': '2026-05', 'error': 'PublicCustomerNameError'}]}
+        listed = frozenset({'000000001'})
+        cases = [('login connection', Mock(arisu_customer_numbers=frozenset(), arisu_login_error='ConnectionError'),
+                  {'rows': [self.bill()], 'errors': []}, True, '아리수 서버에 연결하지 못했습니다'),
+                 # Retrying would log in again with rejected credentials, even though the bills timed out.
+                 ('login rejected', Mock(arisu_customer_numbers=frozenset(), arisu_login_error='LoginError'), timeout, False, '로그인을 확인'),
+                 ('bill timeout', Mock(arisu_customer_numbers=listed, arisu_login_error=None), timeout, True, '청구 내역 조회에 실패'),
+                 ('customer name', Mock(arisu_customer_numbers=listed, arisu_login_error=None), name, False, '성명을 확인')]
+        for label, session, bills, retryable, message in cases:
+            with self.subTest(label):
+                with patch.object(inc, 'fetch_month', return_value=[]), patch.object(inc, 'collect_bills', return_value=bills):
+                    result = inc.collect_meter(self.meter, session=session)
+                self.assertIn(result['status'], ('failed', 'partial'))
+                self.assertEqual(result['retryable'], retryable)
+                self.assertIn(message, result['message'])
+        # A billing-only meter without a stored bill name needs the login for its bills as well.
+        with db.connect() as conn:
+            conn.execute('UPDATE meters SET daily_enabled=0')
+            meter = catalog.list_meters(conn)[0]
+        with patch.object(inc, 'fetch_month') as water, patch.object(inc, 'collect_bills',
+                return_value={'rows': [], 'errors': [{'start': '2026-05', 'error': 'CustomerAccessError'}]}):
+            result = inc.collect_meter(meter, session=Mock(arisu_customer_numbers=frozenset(), arisu_login_error='ConnectTimeout'))
+        water.assert_not_called()
+        self.assertEqual((result['status'], result['retryable']), ('failed', True))
 
     def test_failed_bill_window_is_retried_even_when_existing_months_are_present(self):
         with patch.object(inc, 'fetch_month', return_value=[]), patch.object(inc, 'collect_bills',

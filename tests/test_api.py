@@ -5,7 +5,7 @@ import sqlite3
 import tempfile
 import threading
 import unittest
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import Mock, patch
 from urllib.parse import unquote
@@ -316,7 +316,7 @@ class ApplicationTest(unittest.TestCase):
         stop = Mock()
         stop.is_set.side_effect = [False, False, False, False, True]
         with patch.object(config, 'DATA_DIR', Path(self.temp.name) / 'runtime'), \
-             patch.object(collection, 'schedule_due'), \
+             patch.object(collection, 'schedule_due', return_value=None), \
              patch.object(collection, 'run_job', side_effect=RuntimeError('worker error')) as run_job, \
              patch.object(collection.db, 'connect', side_effect=flaky_connect):
             collection.worker(stop)
@@ -401,8 +401,9 @@ class ApplicationTest(unittest.TestCase):
                 self.assertEqual(c.execute('SELECT count(*) FROM collection_items').fetchone()[0], 1)
                 c.execute("UPDATE collection_jobs SET status='success'")
                 c.execute("UPDATE collection_items SET status='success'")
-                collection.schedule_due(c, current)
+                self.assertIsNone(collection.schedule_due(c, current))   # 모두 성공: 재시도·메일 없이 마무리
                 self.assertEqual(c.execute('SELECT count(*) FROM collection_jobs').fetchone()[0], 1)
+                self.assertEqual(c.execute("SELECT value FROM settings WHERE key='collection_auto_settled'").fetchone()[0], '2026-09-23')
                 collection.schedule_due(c, datetime(2026, 9, 24, 7, tzinfo=collection.KST))
                 self.assertEqual(c.execute('SELECT count(*) FROM collection_jobs').fetchone()[0], 1)
                 collection.schedule_due(c, datetime(2026, 9, 24, 8, tzinfo=collection.KST))
@@ -424,6 +425,147 @@ class ApplicationTest(unittest.TestCase):
             self.assertEqual(c.execute("SELECT count(*) FROM collection_jobs WHERE trigger='automatic'").fetchone()[0], 1)
             with patch.object(config, 'COLLECTION_WORKER_ENABLED', True):   # 오늘 자동 수집을 넣은 뒤에는 다음 날 08:00
                 self.assertEqual(collection.settings(c, datetime(2026, 9, 23, 10, tzinfo=collection.KST))['next_run_at'], '2026-09-24T08:00:00+09:00')
+
+    def schedule_at(self, hour, minute=0, day=23):
+        with db.connect() as c:
+            c.execute('BEGIN IMMEDIATE')
+            return collection.schedule_due(c, datetime(2026, 9, day, hour, minute, tzinfo=collection.KST))
+
+    def finish_queued_job(self, collect, hour, minute, stop=None, session=None, day=23):
+        """Runs the queued job through run_job with a stand-in collector and Arisu session, finishing at hour:minute KST."""
+        with db.connect() as c:
+            job_id = c.execute("SELECT id FROM collection_jobs WHERE status='queued'").fetchone()[0]
+        with patch('back.scripts.billing_etl.i121_crawler.auth.collection_session', return_value=session or Mock(arisu_login_error=None)), \
+             patch('back.pipelines.incremental.collect_meter', side_effect=collect):
+            collection.run_job(job_id, stop or threading.Event())
+        finished = datetime(2026, 9, day, hour, minute, tzinfo=collection.KST).astimezone(timezone.utc).isoformat(timespec='seconds')
+        with db.connect() as c:
+            c.execute('UPDATE collection_jobs SET finished_at=? WHERE id=?', (finished, job_id))
+            return [r[0] for r in c.execute('SELECT meter_id FROM collection_items WHERE job_id=? ORDER BY meter_id', (job_id,))]
+
+    def test_daily_network_failures_retry_twice_30_minutes_apart_then_mail_once(self):
+        timeout = {'status': 'failed', 'message': '아리수 서버의 응답 시간이 초과되었습니다.', 'retryable': True}
+        results = {'000000001': timeout, '000000002': {'status': 'partial', 'message': '일일 사용량: 아리수 계정 설정 또는 로그인을 확인해 주세요', 'bill_rows': 1}}
+        collect = lambda meter, **kwargs: results[meter['id']]
+        self.assertIsNone(self.schedule_at(8))
+        self.assertEqual(self.finish_queued_job(collect, 8, 20), ['000000001', '000000002'])
+        self.assertIsNone(self.schedule_at(8, 49))   # 끝나고 30분이 지나야 다시 시도한다
+        with db.connect() as c:
+            self.assertEqual(c.execute('SELECT count(*) FROM collection_jobs').fetchone()[0], 1)
+        self.assertIsNone(self.schedule_at(8, 50))
+        self.assertEqual(self.finish_queued_job(collect, 8, 55), ['000000001'])   # 로그인 문제는 다시 시도하지 않는다
+        self.assertIsNone(self.schedule_at(9, 24))   # 두 번째도 앞 재시도가 끝나고 30분 뒤
+        with db.connect() as c:
+            self.assertEqual(c.execute('SELECT count(*) FROM collection_jobs').fetchone()[0], 2)
+        self.assertIsNone(self.schedule_at(9, 25))
+        self.assertEqual(self.finish_queued_job(collect, 9, 30), ['000000001'])
+        alert = self.schedule_at(10)
+        self.assertEqual((alert['day'], alert['retries'], alert['recipients']), ('2026-09-23', 2, ['chief@example.com']))
+        self.assertEqual([(i['meter_id'], i['status'], i['display_name']) for i in alert['items']],
+                         [('000000001', 'failed', '동부역'), ('000000002', 'partial', '서부역')])
+        self.assertIsNone(self.schedule_at(11))   # 메일은 하루 한 번
+        with db.connect() as c:
+            self.assertEqual([r[0] for r in c.execute('SELECT trigger FROM collection_jobs ORDER BY id')], ['automatic', 'automatic_retry', 'automatic_retry'])
+            self.assertEqual(c.execute("SELECT value FROM settings WHERE key='collection_auto_settled'").fetchone()[0], '2026-09-23')
+
+    def test_interrupted_daily_run_is_retried_and_unrecovered_failure_is_mailed(self):
+        stop = threading.Event()
+
+        def interrupted(meter, **kwargs):
+            stop.set()   # 서버가 첫 계량기 뒤에 멈춘다
+            return {'status': 'success', 'message': '자료 확인'}
+
+        self.assertIsNone(self.schedule_at(8))
+        self.finish_queued_job(interrupted, 8, 10, stop)
+        with db.connect() as c:
+            self.assertEqual(c.execute("SELECT status FROM collection_items WHERE meter_id='000000002'").fetchone()[0], 'interrupted')
+        self.assertIsNone(self.schedule_at(8, 40))
+        name_error = {'status': 'failed', 'message': '청구서: 고객번호와 고지서상 성명을 확인해 주세요'}
+        self.assertEqual(self.finish_queued_job(lambda meter, **kwargs: name_error, 8, 45), ['000000002'])
+        alert = self.schedule_at(9, 30)   # 자료 오류는 재시도 한도 전이라도 다시 시도하지 않고 바로 알린다
+        self.assertEqual((alert['retries'], [i['meter_id'] for i in alert['items']]), (1, ['000000002']))
+        body = mailer.build_collection_alert_html(alert)
+        self.assertIn('재시도 1번', body)
+        self.assertIn('서부역(000000002)', body)
+
+    def test_rejected_login_stops_retries_for_the_rest_of_the_day(self):
+        stop = threading.Event()
+        rejected = Mock(arisu_customer_numbers=frozenset(), arisu_login_error='LoginError')
+        login = {'status': 'partial', 'message': '일일 사용량: 아리수 계정 설정 또는 로그인을 확인해 주세요', 'bill_rows': 1}
+
+        def interrupted(meter, **kwargs):
+            stop.set()   # 비밀번호가 거부된 날, 서버가 첫 계량기 뒤에 멈춘다
+            return login
+
+        self.assertIsNone(self.schedule_at(8))
+        self.finish_queued_job(interrupted, 8, 10, stop, rejected)
+        alert = self.schedule_at(9)   # 중단된 계량기도 다시 로그인하지 않고 바로 알린다
+        self.assertEqual((alert['retries'], [(i['meter_id'], i['status']) for i in alert['items']]),
+                         (0, [('000000001', 'partial'), ('000000002', 'interrupted')]))
+        # 다음 날은 평소처럼 한 번 로그인하고, 일시 오류는 다시 시도한다.
+        timeout = {'status': 'failed', 'message': '아리수 서버의 응답 시간이 초과되었습니다.', 'retryable': True}
+        self.assertIsNone(self.schedule_at(8, day=24))
+        self.finish_queued_job(lambda meter, **kwargs: timeout, 8, 20, day=24)
+        self.assertIsNone(self.schedule_at(8, 50, day=24))
+        with db.connect() as c:
+            self.assertEqual([r[0] for r in c.execute('SELECT trigger FROM collection_jobs ORDER BY id')], ['automatic', 'automatic', 'automatic_retry'])
+
+    def test_login_rejected_in_manual_update_cancels_pending_retry(self):
+        timeout = {'status': 'failed', 'message': '아리수 서버의 응답 시간이 초과되었습니다.', 'retryable': True}
+        self.assertIsNone(self.schedule_at(8))
+        self.finish_queued_job(lambda meter, **kwargs: timeout, 8, 5)
+        with db.connect() as c:
+            c.execute('BEGIN IMMEDIATE')
+            collection.enqueue(c, ['000000001'], 'manual')
+        login = {'status': 'partial', 'message': '일일 사용량: 아리수 계정 설정 또는 로그인을 확인해 주세요', 'bill_rows': 1}
+        self.finish_queued_job(lambda meter, **kwargs: login, 8, 10, session=Mock(arisu_customer_numbers=frozenset(), arisu_login_error='LoginError'))
+        alert = self.schedule_at(8, 40)   # 08:05 시간 초과분도 다시 로그인하지 않는다
+        self.assertEqual([(i['meter_id'], i['status']) for i in alert['items']], [('000000001', 'partial'), ('000000002', 'failed')])
+        with db.connect() as c:
+            self.assertEqual([r[0] for r in c.execute('SELECT trigger FROM collection_jobs ORDER BY id')], ['automatic', 'manual'])
+
+    def test_worker_mails_settled_failures_after_commit_and_survives_mail_errors(self):
+        alert = {'day': '2026-09-23', 'retries': 2, 'recipients': ['chief@example.com'],
+                 'items': [{'meter_id': '000000001', 'status': 'failed', 'message': '응답 시간 초과 <b>',
+                            'display_name': '동부역', 'customer_number': '000000001'}]}
+        for outcome in ({'sent': True, 'to': ['chief@example.com']}, RuntimeError('smtp down')):
+            with self.subTest(outcome=type(outcome).__name__):
+                def send(subject, body, to):
+                    with db.connect() as c:
+                        c.execute('BEGIN IMMEDIATE')   # 큐 트랜잭션을 끝낸 뒤 보낸다
+                    if isinstance(outcome, Exception):
+                        raise outcome
+                    return outcome
+
+                stop = Mock()
+                stop.is_set.side_effect = [False, False, True]
+                with patch.object(config, 'DATA_DIR', Path(self.temp.name) / 'runtime'), \
+                     patch.object(collection, 'schedule_due', return_value=alert), \
+                     patch.object(mailer, 'send_mail', side_effect=send) as mail:
+                    collection.worker(stop)
+                subject, body, to = mail.call_args.args
+                self.assertIn('1곳', subject)
+                self.assertEqual(to, 'chief@example.com')
+                self.assertIn('재시도 2번', body)
+                self.assertNotIn('<b>', body)
+        with db.connect() as c:
+            self.assertEqual([(r[0], json.loads(r[1]).get('reason')) for r in c.execute("SELECT action,details FROM audit_log WHERE action LIKE 'collection_alert%' ORDER BY id")],
+                             [('collection_alert_sent', None), ('collection_alert_failed', 'RuntimeError')])
+
+    def test_existing_collection_history_gains_retry_flag(self):
+        with db.connect() as c:
+            c.executescript('''DROP TABLE collection_items;
+                CREATE TABLE collection_items(
+                  job_id INTEGER NOT NULL REFERENCES collection_jobs(id),meter_id TEXT NOT NULL REFERENCES meters(id),
+                  status TEXT NOT NULL DEFAULT 'queued',message TEXT NOT NULL DEFAULT '',started_at TEXT,finished_at TEXT,
+                  daily_rows INTEGER NOT NULL DEFAULT 0,bill_rows INTEGER NOT NULL DEFAULT 0,
+                  connection_verified INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(job_id,meter_id));
+                INSERT INTO collection_jobs(id,status,trigger,created_at) VALUES(1,'failed','automatic','2026-09-22T23:00:00+00:00');
+                INSERT INTO collection_items(job_id,meter_id,status) VALUES(1,'000000001','failed');''')
+        db.init_db()
+        db.init_db()
+        with db.connect() as c:
+            self.assertEqual(tuple(c.execute('SELECT status,retryable FROM collection_items').fetchone()), ('failed', 0))
 
     def test_collection_worker_keeps_partial_results_and_no_false_connection(self):
         self.login()
@@ -482,16 +624,18 @@ class ApplicationTest(unittest.TestCase):
         from requests import Response
         from requests.exceptions import ConnectionError, HTTPError, Timeout
         from back.scripts.billing_etl.i121_crawler.auth import ConfigurationError, LoginError
-        cases = [(ConfigurationError('private'), '설정'), (LoginError('private'), '로그인'),
-                 (Timeout('private'), '응답 시간'), (ConnectionError('private'), '네트워크')]
+        # Only network trouble is retried automatically; a rejected login could lock the account.
+        cases = [(ConfigurationError('private'), '설정', False), (LoginError('private'), '로그인', False),
+                 (Timeout('private'), '응답 시간', True), (ConnectionError('private'), '네트워크', True)]
         for code in (401, 403, 404, 429, 503):
             response = Response()
             response.status_code = code
-            cases.append((HTTPError('private', response=response), f'HTTP {code}'))
-        for error, expected in cases:
+            cases.append((HTTPError('private', response=response), f'HTTP {code}', code in (429, 503)))
+        for error, expected, retryable in cases:
             with self.subTest(error=type(error).__name__, expected=expected):
                 result = collection.failure_result(error)
                 self.assertIn(expected, result['message'])
+                self.assertEqual(result['retryable'], retryable)
                 self.assertNotIn('private', result['message'])
                 self.assertIn('기존 자료는 보존', result['message'])
 
