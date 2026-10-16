@@ -262,8 +262,8 @@ def meter_values(c, body, user, existing=None):
         raise HTTPException(422, '고객번호나 공급기관이 바뀌었다면 새 계량기로 등록하세요.')
     if not value['display_name']:
         raise HTTPException(422, '계량기 표시명을 입력하세요.')
-    if value['line'] and not re.fullmatch(r'[1-9]', value['line']):
-        raise HTTPException(422, '호선은 1~9 중 선택하세요.')
+    if value['line'] and not re.fullmatch(r'[1-8]', value['line']):   # 서울교통공사는 1~8호선만 관리한다
+        raise HTTPException(422, '호선은 1~8 중 선택하세요.')
     for key in ('active', 'daily_enabled'):
         raw = value.get(key, key == 'active')
         if raw not in (True, False, 0, 1):

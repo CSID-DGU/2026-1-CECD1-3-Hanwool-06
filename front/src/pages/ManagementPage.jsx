@@ -180,7 +180,7 @@ function MeterForm({ item, data, onSaved, canPosition, onExisting }) {
     <label className="check-field"><input type="checkbox" checked={isNewStation} onChange={(e) => { setIsNewStation(e.target.checked); setPosition(null); }} />목록에 없는 새 역</label>
     {isNewStation ? <label className="form-field">역명<input required value={form.station_name} onChange={(e) => field("station_name", e.target.value)} placeholder="예: 동대문역" /></label>
       : <label className="form-field">역<select required value={form.station_id} onChange={(e) => { field("station_id", e.target.value); setPosition(null); }}>{stations.map((s) => <option value={s.id} key={s.id}>{s.name}</option>)}</select></label>}
-    <div className="form-grid"><label className="form-field">호선<select value={form.line} onChange={(e) => field("line", e.target.value)}>{[1,2,3,4,5,6,7,8,9].map((line) => <option key={line} value={line}>{line}호선</option>)}</select></label>
+    <div className="form-grid"><label className="form-field">호선<select value={form.line} onChange={(e) => field("line", e.target.value)}>{[1,2,3,4,5,6,7,8].map((line) => <option key={line} value={line}>{line}호선</option>)}</select></label>
       <label className="form-field">담당 사업소<select required value={form.office_id} onChange={(e) => field("office_id", e.target.value)}>{(data.offices || []).map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</select></label></div>
     <label className="form-field">계량기 이름 / 설치 위치<input required maxLength={100} value={form.display_name} onChange={(e) => field("display_name", e.target.value)} placeholder="예: 대합실 화장실" /></label>
     <label className="form-field">계량기번호<input value={meterNumber} onChange={(e) => setMeterNumber(e.target.value)} /></label>

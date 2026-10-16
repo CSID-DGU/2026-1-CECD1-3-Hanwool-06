@@ -2,7 +2,7 @@ import { billUsage, buildStations, SEVERITY_TONE } from "../Detail/data.js";
 // 서울교통공사 노선색.
 export const lineColors = {
   1: "#0052a4", 2: "#00a84d", 3: "#ef7c1c", 4: "#00a5de", 5: "#996cac",
-  6: "#cd7c2f", 7: "#747f00", 8: "#e6186c", 9: "#8e6e2e",
+  6: "#cd7c2f", 7: "#747f00", 8: "#e6186c",
 };
 export const riskMeta = {
   all: { label: "전체", tone: "all" }, alert: { label: "경고", tone: "alert" },

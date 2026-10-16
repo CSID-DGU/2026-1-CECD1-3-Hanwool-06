@@ -95,6 +95,8 @@ class ApplicationTest(unittest.TestCase):
         self.assertEqual(manager.post('/api/analyze',json={'meter_id':'000000001','date':'2025-01-01'}).status_code, 404)
         self.assertEqual(manager.get('/api/summary?date=bad').status_code, 422)
         self.assertEqual(manager.patch('/api/meters/000000001',json={'office_id':'서부'}).status_code, 403)
+        nine = manager.post('/api/meters',json={'provider':'arisu','customer_number':'000000004','station_name':'신규역','office_id':'동부','display_name':'9호선','line':'9'})
+        self.assertEqual(nine.status_code, 422, nine.text)   # 서울교통공사는 1~8호선만 관리한다
         saved = manager.post('/api/meters',json={'provider':'arisu','customer_number':'000000003','station_name':'신규역','office_id':'동부','display_name':'신규역 직원용','line':'2'})
         self.assertEqual(saved.status_code, 201, saved.text)
         changed = manager.get('/api/data', params={'version': payload['version']})

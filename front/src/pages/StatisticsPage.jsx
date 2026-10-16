@@ -38,7 +38,7 @@ export default function StatisticsPage({ data }) {
       <label className="form-field">시작일<input type="date" required value={filters.start} max={filters.end} onChange={(e) => change("start", e.target.value)} /></label>
       <label className="form-field">종료일<input type="date" required value={filters.end} min={filters.start} onChange={(e) => change("end", e.target.value)} /></label>
       <label className="form-field">사업소<select value={filters.office_id} onChange={(e) => change("office_id", e.target.value)}><option value="">전체</option>{(data.offices || []).map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</select></label>
-      <label className="form-field">호선<select value={filters.line} onChange={(e) => change("line", e.target.value)}><option value="">전체</option>{[1,2,3,4,5,6,7,8,9].map((l) => <option key={l} value={l}>{l}호선</option>)}</select></label>
+      <label className="form-field">호선<select value={filters.line} onChange={(e) => change("line", e.target.value)}><option value="">전체</option>{[1,2,3,4,5,6,7,8].map((l) => <option key={l} value={l}>{l}호선</option>)}</select></label>
       <label className="form-field stats-meter">계량기<select value={filters.meter_id} onChange={(e) => change("meter_id", e.target.value)}><option value="">전체</option>{meters.map((m) => <option key={m.id} value={m.id}>{m.station_name} {m.line ? `${m.line}호선 ` : ""}{m.display_name || "기본 계량기"} ({m.customer_number})</option>)}</select></label>
       <button className="primary-button" disabled={loading}>{loading ? "조회 중…" : "조회"}</button>
     </form>
