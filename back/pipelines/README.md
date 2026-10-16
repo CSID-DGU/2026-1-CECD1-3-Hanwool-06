@@ -81,6 +81,8 @@ the web interface; queued jobs persist across restarts.
 Historical `data/processed` observations are reused. The recovered ridership file
 includes all 80 reviewed contracts. Old water CSV aliases are resolved through the
 reviewed `data/billing/meter_match.csv`; new data carries its customer number directly.
+The historical water file's `검침일` is the reading date: Arisu records a day's use on the next day, so it is moved
+back one day to the usage day (`사용일`) that keys collected water files, ridership and the calendar.
 Unknown aliases fail validation rather than being guessed. Calendar coverage is
 regenerated for the available observations. Display labels come from the registry.
 

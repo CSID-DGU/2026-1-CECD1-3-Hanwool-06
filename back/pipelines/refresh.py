@@ -34,7 +34,9 @@ def build_dataset(output_dir, *, meters, data_root=None, daily_root=None, train_
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     mapping = {customer_number(m["customer_number"]): m for m in meters}
-    daily = _read_csv(data_root / "processed" / "daily_water_usage.csv").rename(columns={"검침일": "날짜"})
+    daily = _read_csv(data_root / "processed" / "daily_water_usage.csv")
+    # 날짜는 물을 쓴 날(사용일)이다. 과거 자료의 검침일 D 값은 D-1 하루 사용분(검침일자 = 사용일 + 1)이라 하루 당긴다.
+    daily["날짜"] = (pd.to_datetime(daily["검침일"], errors="raise") - pd.Timedelta(days=1)).dt.strftime("%Y-%m-%d")
     rides = _read_csv(data_root / "processed" / "ridership.csv").rename(columns={"사용일": "날짜"})
     rides["총승객수"] = rides["승차총승객수"] + rides["하차총승객수"]
     # Legacy rows identify observations by a reviewed CSV alias, never by a fuzzy station match.

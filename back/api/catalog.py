@@ -6,7 +6,7 @@ import hashlib
 import json
 import math
 import re
-from datetime import datetime, timezone
+from datetime import date as Date, datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 
@@ -172,10 +172,15 @@ def _fallback_data(signature):
     names = {}
     paths = [Path(p) for p, *_ in signature]
 
-    def add(cid, date, field, value):
+    def add(cid, date, field, value, reading=False):
         cid, value = customer_id(cid), number(value)
         if not cid or value is None or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(date or "")):
             return
+        if reading:   # 과거 자료의 검침일 D 값은 D-1에 쓴 물이다. 수집 자료·승하차와 같은 사용일로 둔다.
+            try:
+                date = (Date.fromisoformat(date) - timedelta(days=1)).isoformat()
+            except ValueError:   # 형식은 맞지만 달력에 없는 날(2026-02-30 등)은 건너뛴다
+                return
         daily.setdefault(cid, {"usage": {}, "ridership": {}})[field][date] = value
 
     master = next((p for p in paths if p.name == "master.csv"), None)
@@ -191,7 +196,7 @@ def _fallback_data(signature):
             for r in read_csv(p):
                 cid = customer_id(r["고객번호"])
                 names[r["역명"]] = cid
-                add(cid, r.get("검침일"), "usage", r.get("일사용량_톤"))
+                add(cid, r.get("검침일"), "usage", r.get("일사용량_톤"), reading=True)
         elif p.name == "ridership.csv" and p.parent.name == "processed":
             for r in read_csv(p):
                 cid = customer_id(r["고객번호"])
@@ -201,7 +206,7 @@ def _fallback_data(signature):
                         add(cid, r.get("사용일"), "ridership", boarding + leaving)
     if master:
         for r in read_csv(master):
-            add(r["고객번호"], r["날짜"], "usage", r.get("일사용량_톤"))
+            add(r["고객번호"], r["날짜"], "usage", r.get("일사용량_톤"), reading=True)   # 이 파일의 사용량만 검침일 기준
             add(r["고객번호"], r["날짜"], "ridership", r.get("총승객수"))
     for p in paths:
         if p.parent.name in ("water", "ridership") and "daily" in p.parts:

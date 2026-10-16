@@ -21,6 +21,8 @@ from back.ml.lightgbm.utils import save_csv, save_json
 from back.pipelines.refresh import build_dataset, publish_snapshot
 from back.pipelines import refresh
 
+ROOT = Path(__file__).resolve().parents[1]
+
 METERS = [{"id": str(n), "customer_number": str(n).zfill(9), "provider": "arisu",
            "station_name": {1: "강동역", 2: "길동역"}[n], "line": n, "active": True, "daily_enabled": True}
           for n in [1, 2]]
@@ -423,16 +425,18 @@ class PipelineTest(unittest.TestCase):
         processed.mkdir()
         (self.path / 'billing').mkdir()
         dates = pd.date_range('2025-01-01', periods=110).strftime('%Y-%m-%d')
-        water = [{'고객번호': '1', '검침일': day, '일사용량_톤': 10} for day in dates]
+        readings = pd.date_range('2025-01-02', periods=110).strftime('%Y-%m-%d')   # 검침일 = 사용일 + 1
+        water = [{'고객번호': '1', '검침일': day, '일사용량_톤': 10} for day in readings]
         water[-1]['일사용량_톤'] = 3186
-        water.append({'고객번호': '2', '검침일': dates[-1], '일사용량_톤': 20})
+        water.append({'고객번호': '2', '검침일': readings[-1], '일사용량_톤': 20})
         pd.DataFrame(water).to_csv(processed / 'daily_water_usage.csv', index=False)
         pd.DataFrame([{'고객번호': '1', '사용일': dates[-1], '승차총승객수': 30, '하차총승객수': 40}]).to_csv(processed / 'ridership.csv', index=False)
         pd.DataFrame([{'고객번호': '1', '일일CSV파일명': '옛이름'}]).to_csv(self.path / 'billing/meter_match.csv', index=False)
         master, _, withheld, eligible = build_dataset(self.path / 'output', meters=METERS,
             data_root=self.path, daily_root=self.path / 'daily', train_end=dates[89], valid_end=dates[103])
         self.assertEqual(eligible, {'000000001'})
-        self.assertEqual(master[master['고객번호'] == '000000001'].iloc[-1]['일사용량_톤'], 3186)
+        last = master[master['고객번호'] == '000000001'].iloc[-1]
+        self.assertEqual((last['날짜'], last['일사용량_톤'], last['총승객수']), (dates[-1], 3186, 70))
         self.assertEqual(withheld[0]['customer_number'], '000000002')
         new = master[master['고객번호'] == '000000002'].iloc[0]
         self.assertEqual(new['역명'], '길동역')
@@ -449,6 +453,46 @@ class PipelineTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             build_dataset(self.path / 'output', meters=METERS, data_root=self.path, daily_root=self.path / 'daily',
                           train_end=dates[89], valid_end=dates[103], test_end=dates[103])
+
+    def test_history_reading_dates_become_the_usage_days_of_collected_files(self):
+        processed = self.path / 'processed'
+        processed.mkdir()
+        (self.path / 'billing').mkdir()
+        # The readings of 03-01..03-05 measured the water used on 02-28..03-04.
+        pd.DataFrame([{'고객번호': '1', '검침일': f'2026-03-0{d}', '일사용량_톤': 9 + d} for d in range(1, 6)]).to_csv(
+            processed / 'daily_water_usage.csv', index=False)
+        pd.DataFrame([{'고객번호': '1', '사용일': '2026-03-02', '승차총승객수': 30, '하차총승객수': 40}]).to_csv(
+            processed / 'ridership.csv', index=False)
+        pd.DataFrame([{'고객번호': '1', '일일CSV파일명': '옛이름'}]).to_csv(self.path / 'billing/meter_match.csv', index=False)
+        water = self.path / 'daily' / 'water'
+        water.mkdir(parents=True)
+        # The collector keys the same readings by 사용일 (검침일자 = 사용일 + 1) and continues after the history.
+        for day, value in [('2026-03-03', 13), ('2026-03-04', 14), ('2026-03-05', 15), ('2026-03-06', 16)]:
+            pd.DataFrame([{'고객번호': '000000001', '역명': '강동역', '사용일': day, '일사용량(톤)': value}]).to_csv(
+                water / f'{day}.csv', index=False)
+        master, *_ = build_dataset(self.path / 'output', meters=METERS[:1], data_root=self.path,
+                                   daily_root=self.path / 'daily', train_end='2026-03-01', valid_end='2026-03-03')
+        self.assertEqual(master['날짜'].tolist(), ['2026-02-28', '2026-03-01', '2026-03-02', '2026-03-03',
+                                                 '2026-03-04', '2026-03-05', '2026-03-06'])
+        self.assertEqual(master['일사용량_톤'].tolist(), [10, 11, 12, 13, 14, 15, 16])   # no day lost or counted twice
+        day = master[master['날짜'] == '2026-03-02'].iloc[0]
+        self.assertEqual((day['총승객수'], day['요일']), (70, '월'))   # water and riders of the same day
+
+    def test_history_dates_are_arisu_reading_dates_one_day_after_use(self):
+        # Arisu's history export lists each billing period's usage days beside its readings, which run
+        # from start+1 to end+1. data/processed keeps exactly those reading dates as 검침일.
+        names = pd.read_csv(ROOT / 'data/billing/meter_match.csv', encoding='utf-8-sig', dtype=str)
+        alias = dict(zip(names['일일CSV파일명'], names['고객번호'].str.zfill(9)))
+        export = pd.concat([pd.read_csv(p, encoding='utf-8-sig').assign(고객번호=alias[p.stem]) for p in
+                            sorted((ROOT / 'archive/data/arisu_station_history').glob('*.csv'))], ignore_index=True)
+        period = export['사용일'].str.extract(r'(\d{4}-\d{2}-\d{2}) ~ (\d{4}-\d{2}-\d{2})')
+        used = pd.to_datetime(export['검침일자']) - pd.Timedelta(days=1)
+        self.assertTrue(used.between(pd.to_datetime(period[0]), pd.to_datetime(period[1])).all())
+        history = pd.read_csv(ROOT / 'data/processed/daily_water_usage.csv', encoding='utf-8-sig', dtype={'고객번호': str})
+        found = history.assign(고객번호=history['고객번호'].str.zfill(9)).merge(
+            export.drop_duplicates(['고객번호', '검침일자']), left_on=['고객번호', '검침일'], right_on=['고객번호', '검침일자'])
+        self.assertEqual(len(found), len(history))
+        self.assertTrue((found['일사용량_톤'] == found['일사용량(톤)']).all())
 
 
 if __name__ == '__main__':

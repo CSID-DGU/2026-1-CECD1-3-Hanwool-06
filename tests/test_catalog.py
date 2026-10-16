@@ -100,11 +100,23 @@ class CatalogCheck(unittest.TestCase):
             {"고객번호": "1", "역명": "가역1", "검침일": "2026-06-13", "일사용량_톤": "10"}])
         data = catalog.payload(["가사업소"])
         self.assertEqual(data["status"]["latest_risk"], "2026-06-13")
+        self.assertEqual(data["daily"]["000000001"]["usage"], [{"date": "2026-06-12", "value": 10.0}])   # 검침일 - 1
         self.assertEqual(data["risk"]["000000001"][-1]["pred"], 7)
         bills = data["bills"]["000000001"]["bills"]
         self.assertEqual({b["gubun"] for b in bills if b["ym"] == "2026-05"}, {"정기분", "수시분"})
         self.assertIsNone(bills[-1]["사용량"])
         self.assertFalse(bills[-1]["detail_available"])
+
+    def test_fallback_moves_only_history_usage_to_the_usage_day(self):
+        # ml_dataset/master.csv keeps usage on the reading date but riders on the day of travel.
+        self.write_csv(self.root / "data/ml_dataset/master.csv", [
+            {"고객번호": "1", "역명": "가역1", "날짜": "2026-03-02", "일사용량_톤": "12", "총승객수": "70"}])
+        self.write_csv(self.root / "data/daily/water/2026-03-05.csv", [
+            {"고객번호": "000000001", "역명": "가역1", "사용일": "2026-03-05", "일사용량(톤)": "15"}])
+        daily, _ = catalog.data_sources()
+        self.assertEqual(daily["000000001"]["usage"], [{"date": "2026-03-01", "value": 12.0},
+                                                       {"date": "2026-03-05", "value": 15.0}])
+        self.assertEqual(daily["000000001"]["ridership"], [{"date": "2026-03-02", "value": 70.0}])
 
     def test_archived_meter_stays_private_and_restores_preserved_history(self):
         deleted_at = "2026-09-23T00:00:00+00:00"

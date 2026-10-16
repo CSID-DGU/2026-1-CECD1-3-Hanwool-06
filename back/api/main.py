@@ -645,7 +645,7 @@ def statistics(start: str | None = None, end: str | None = None, office_id: str 
                 if number is not None:
                     group[target] = round((group[target] or 0) + number, 3)
             group['observation_count' if kind == 'usage' else 'bill_count'] += 1
-    return {'rows': [groups[key] for key in sorted(groups)], 'note': '일일 사용량은 검침일, 요금은 청구월을 기준으로 합산했습니다. 납부금액이 없는 청구서는 부과금액으로 계산했고, 값이 없는 항목은 합계에서 뺐습니다.'}
+    return {'rows': [groups[key] for key in sorted(groups)], 'note': '일일 사용량은 사용일(물을 쓴 날), 요금은 청구월을 기준으로 합산했습니다. 납부금액이 없는 청구서는 부과금액으로 계산했고, 값이 없는 항목은 합계에서 뺐습니다.'}
 
 
 # Only explicitly built frontend assets are public; raw data directories are never mounted.

@@ -17,6 +17,7 @@ They must not be copied to Vite public assets or a public static download direct
 - `risk/test_anomalies.csv`: the canonical initial risk dataset (11,285 rows), preserved from
   the previous model results. Runtime snapshots supersede it after publication; the app
   does not read archived experiments.
+  `날짜` is the usage day (`사용일`); rows through 2026-04-29 were moved back one day from their reading date (`검침일`).
 
 Seed migrations run once and preserve subsequent registry changes. Current 80-meter review notes
 and usage purposes come from `data/billing/mkey_station_map.csv` and `meter_match.csv`.
