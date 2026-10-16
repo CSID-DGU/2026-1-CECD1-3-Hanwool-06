@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { billGroundwater, billLabel, billNoticeNumber, billUsage, billWindow, buildRisk, buildStations, chartRange, detailHref, latestDate, monthCells, shiftMonth, signedPct } from "../src/pages/Detail/data.js";
 import { buildDashboard, buildMapGroups } from "../src/pages/Dashboard/dashboardData.js";
-import { deleteMeter, exportUrl, getData, getMeters, request, restoreMeter, saveCollectionSettings, setCsrfToken, startCollection, waitForDownload } from "../src/api.js";
+import { deleteMeter, exportUrl, getData, getMeters, request, restoreMeter, setCsrfToken, startCollection, waitForDownload } from "../src/api.js";
 import { collectionNeedsRefresh, collectionTime, isCollectionActive, meterCollectionState } from "../src/collection.js";
 import { statisticsPeriod } from "../src/pages/statisticsData.js";
 
@@ -207,7 +207,7 @@ test("collection completion invalidates data once even when a queued job takes o
   assert.match(collectionTime("2026-09-22T23:00:00Z"), /08:00/);
 });
 
-test("delete, restore, collection and settings preserve API methods and customer IDs", async () => {
+test("delete, restore and collection preserve API methods and customer IDs", async () => {
   const originalFetch = globalThis.fetch;
   const calls = [];
   try {
@@ -218,11 +218,9 @@ test("delete, restore, collection and settings preserve API methods and customer
     await restoreMeter("000000001");
     await startCollection("000000001");
     await startCollection();
-    await saveCollectionSettings({ enabled: true, hour: 8 });
-    assert.deepEqual(calls.map((c) => [c.path, c.method]), [["/api/meters?include_deleted=true", "GET"], ["/api/meters/000000001", "DELETE"], ["/api/meters/000000001/restore", "POST"], ["/api/collection", "POST"], ["/api/collection", "POST"], ["/api/collection/settings", "PATCH"]]);
+    assert.deepEqual(calls.map((c) => [c.path, c.method]), [["/api/meters?include_deleted=true", "GET"], ["/api/meters/000000001", "DELETE"], ["/api/meters/000000001/restore", "POST"], ["/api/collection", "POST"], ["/api/collection", "POST"]]);
     assert.equal(calls[3].body, '{"meter_id":"000000001"}');
     assert.equal(calls[4].body, "{}");
-    assert.equal(calls[5].body, '{"enabled":true,"hour":8}');
     for (const call of calls.slice(1)) assert.equal(call.headers["X-CSRF-Token"], "test-token");
   } finally { globalThis.fetch = originalFetch; setCsrfToken(); }
 });

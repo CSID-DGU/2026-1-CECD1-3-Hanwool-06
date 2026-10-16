@@ -74,7 +74,6 @@ export const deleteMeter = (id) => request(`/meters/${encodeURIComponent(id)}`, 
 export const restoreMeter = (id) => request(`/meters/${encodeURIComponent(id)}/restore`, { method: "POST" });
 export const getCollection = () => request("/collection");
 export const startCollection = (meter_id) => request("/collection", { method: "POST", body: meter_id ? { meter_id } : {} });
-export const saveCollectionSettings = (body) => request("/collection/settings", { method: "PATCH", body });
 export const getSummary = (date) => request(`/summary?${new URLSearchParams(date ? { date } : {})}`);
 export const analyzeCause = (meter_id, date) => request("/analyze", { method: "POST", body: { meter_id, date } });
 export const sendAlert = (meter_id, date) => request("/alert", { method: "POST", body: { meter_id, date } });

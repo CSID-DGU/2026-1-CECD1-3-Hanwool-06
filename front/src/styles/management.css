@@ -56,7 +56,7 @@
 .collection-panel--compact .collection-heading h2 { font-size: 14px; }
 .collection-panel--compact .collection-heading p { margin: 0; }
 .collection-panel--compact .collection-job { background: var(--paper); }
-.collection-details > summary, .collection-settings > summary, .collection-history > summary, .collection-job summary { width: fit-content; color: var(--brand); font-size: 13px; cursor: pointer; }
+.collection-details > summary, .collection-history > summary, .collection-job summary { width: fit-content; color: var(--brand); font-size: 13px; cursor: pointer; }
 .collection-job { padding: 12px 14px; border: 1px solid var(--rule); border-radius: var(--radius); font-size: 13px; }
 .collection-job-title { display: flex; justify-content: space-between; gap: 12px; }
 .collection-job-title strong { font-weight: 600; }
@@ -69,9 +69,6 @@
 .collection-job .table-wrap { max-height: 360px; margin-top: 8px; overflow: auto; }
 .collection-history .collection-job { margin-top: 8px; }
 .collection-schedule { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; margin-bottom: 0; color: var(--sub); font-size: 13px; }
-.collection-settings form { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 12px; margin-top: 12px; }
-.collection-settings form > p { width: 100%; }
-.collection-settings .check-field { align-self: center; }
 .collection-meter-summary { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 16px; color: var(--sub); font-size: 13px; }
 .collection-meter-summary strong { color: var(--ink); font-weight: 600; }
 .collection-meter-summary p { width: 100%; margin: 0; }

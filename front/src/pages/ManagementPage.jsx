@@ -67,7 +67,7 @@ export default function ManagementPage({ data, user, kind, onSaved, collection }
       <button className="primary-button" type="button" onClick={() => { setEditor({}); setMessage(""); }}>{isUsers ? "사용자 추가" : "계량기 추가"}</button></div>
     {error && <p className="form-error" role="alert">{error} <button onClick={() => setRevision((n) => n + 1)}>다시 시도</button></p>}
     {message && <p className="form-message" role="status">{message}</p>}
-    {!isUsers && <CollectionPanel collection={collection} user={user} meters={data.meters || []} showSettings />}
+    {!isUsers && <CollectionPanel collection={collection} meters={data.meters || []} showSettings />}
     <section className="management-card">
       {!isUsers && <div className="management-tabs" role="group" aria-label="계량기 보관 상태"><button aria-pressed={!showDeleted} onClick={() => setShowDeleted(false)}>등록 계량기</button><button aria-pressed={showDeleted} onClick={() => setShowDeleted(true)}>삭제 보관함</button>{showDeleted && <p>복원하면 다시 관제와 수집 대상이 됩니다.</p>}</div>}
       <label className="form-field management-search">{isUsers ? "이름·이메일 검색" : "역명·고객번호·사업소 검색"}<input type="search" value={search} onChange={(e) => setSearch(e.target.value)} /></label>

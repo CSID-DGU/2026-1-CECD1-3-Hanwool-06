@@ -356,8 +356,8 @@ class ApplicationTest(unittest.TestCase):
         self.assertEqual(manager.post('/api/collection', json={'meter_id': '000000002'}).status_code, 404)
         self.assertEqual(manager.delete('/api/meters/000000002').status_code, 404)
         self.assertEqual(manager.post('/api/meters/000000002/restore').status_code, 404)
-        self.assertEqual(manager.patch('/api/collection/settings', json={'enabled': False, 'hour': 9}).status_code, 403)
-        self.assertEqual(self.client.patch('/api/collection/settings', json={'enabled': True, 'hour': 24}).status_code, 422)
+        # The schedule is fixed; no role can change it through the API.
+        self.assertEqual(self.client.patch('/api/collection/settings', json={'enabled': False, 'hour': 9}).status_code, 405)
         queued = self.client.post('/api/collection', json={})
         self.assertEqual(queued.status_code, 202, queued.text)
         self.assertEqual(queued.json()['total'], 2)
@@ -405,6 +405,23 @@ class ApplicationTest(unittest.TestCase):
                 self.assertEqual(c.execute('SELECT count(*) FROM collection_jobs').fetchone()[0], 1)
                 collection.schedule_due(c, datetime(2026, 9, 24, 8, tzinfo=collection.KST))
                 self.assertEqual(c.execute('SELECT count(*) FROM collection_jobs').fetchone()[0], 2)
+
+    def test_daily_schedule_is_fixed_at_8_kst_and_ignores_stored_setting(self):
+        with db.connect() as c:
+            c.execute('BEGIN IMMEDIATE')
+            # An older database may still hold the removed superadmin setting.
+            c.execute("INSERT INTO settings VALUES('collection_schedule',?)", (json.dumps({'enabled': False, 'hour': 9}),))
+            before = datetime(2026, 9, 23, 7, 59, tzinfo=collection.KST)
+            with patch.object(config, 'COLLECTION_WORKER_ENABLED', True):
+                self.assertEqual(collection.settings(c, before), {'enabled': True, 'hour': 8, 'timezone': 'Asia/Seoul', 'next_run_at': '2026-09-23T08:00:00+09:00'})
+            self.assertIsNone(collection.settings(c, before)['next_run_at'])
+            self.assertFalse(collection.settings(c, before)['enabled'])   # 서버에서 끄면 화면에 '꺼짐'
+            collection.schedule_due(c, before)
+            self.assertEqual(c.execute('SELECT count(*) FROM collection_jobs').fetchone()[0], 0)
+            collection.schedule_due(c, datetime(2026, 9, 23, 8, tzinfo=collection.KST))
+            self.assertEqual(c.execute("SELECT count(*) FROM collection_jobs WHERE trigger='automatic'").fetchone()[0], 1)
+            with patch.object(config, 'COLLECTION_WORKER_ENABLED', True):   # 오늘 자동 수집을 넣은 뒤에는 다음 날 08:00
+                self.assertEqual(collection.settings(c, datetime(2026, 9, 23, 10, tzinfo=collection.KST))['next_run_at'], '2026-09-24T08:00:00+09:00')
 
     def test_collection_worker_keeps_partial_results_and_no_false_connection(self):
         self.login()

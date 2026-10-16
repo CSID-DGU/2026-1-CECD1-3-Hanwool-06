@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { getCollection, isStatic, saveCollectionSettings, startCollection } from "../api.js";
+import { getCollection, isStatic, startCollection } from "../api.js";
 import { collectionLabel, collectionNeedsRefresh, collectionTime, isCollectionActive, isCollectionFinished, meterCollectionState } from "../collection.js";
 
 export function useCollection(userId, onComplete) {
@@ -47,10 +47,7 @@ export function useCollection(userId, onComplete) {
     } catch (e) { if (sessionRef.current === userId) { setError(e.message); refresh(); } throw e; }
     finally { if (sessionRef.current === userId) setBusy(false); }
   }
-  async function saveSettings(settings) {
-    await saveCollectionSettings(settings); refresh();
-  }
-  return { data, error, busy, refresh, start, saveSettings };
+  return { data, error, busy, refresh, start };
 }
 
 // 저장된 화면에서는 수집을 실행할 수 없으므로 패널을 그리지 않는다.
@@ -58,7 +55,7 @@ export default function CollectionPanel(props) {
   return isStatic ? null : <Panel {...props} />;
 }
 
-function Panel({ collection, user, meters = [], meterId, showSettings = false }) {
+function Panel({ collection, meters = [], meterId, showSettings = false }) {
   const [notice, setNotice] = useState("");
   const [noticeJobId, setNoticeJobId] = useState(null);
   const [actionError, setActionError] = useState("");
@@ -104,7 +101,7 @@ function Panel({ collection, user, meters = [], meterId, showSettings = false })
         {settings?.enabled && settings.next_run_at ? `, 다음 실행 ${collectionTime(settings.next_run_at)}` : ""}
         <button type="button" className="text-button" onClick={collection.refresh}>상태 새로고침</button>
       </p>
-      {showSettings && user?.role === "superadmin" && <CollectionSettings key={`${settings?.enabled}-${settings?.hour}`} settings={settings || {}} onSave={collection.saveSettings} />}
+      {showSettings && <p className="form-hint">서버가 켜져 있어야 실행됩니다.</p>}
       {showSettings && data.history?.length > 0 && <details className="collection-history"><summary>최근 수집 이력 {data.history.length}건</summary>{data.history.map((entry) => <JobSummary key={entry.id} job={entry} meters={meters} />)}</details>}
     </>}
     {notice && <p className="form-message" role="status">{notice}</p>}
@@ -141,25 +138,4 @@ function JobItems({ items, meters }) {
     const record = meters.find((m) => String(m.id) === String(item.meter_id));
     return <tr key={item.meter_id}><td>{record?.station_name || item.station_name || item.display_name || "계량기"}<small>{record?.customer_number || item.customer_number || item.meter_id}</small></td><td>{collectionLabel(item.status)}</td><td>{item.daily_rows ?? "—"} / {item.bill_rows ?? "—"}</td><td>{item.message || "—"}</td></tr>;
   })}</tbody></table></div>;
-}
-
-function CollectionSettings({ settings, onSave }) {
-  const [enabled, setEnabled] = useState(Boolean(settings.enabled));
-  const [hour, setHour] = useState(settings.hour ?? 8);
-  const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
-  async function submit(e) {
-    e.preventDefault(); setBusy(true); setMessage(""); setError("");
-    try { await onSave({ enabled, hour: Number(hour) }); setMessage("저장했습니다."); }
-    catch (e) { setError(e.message); }
-    finally { setBusy(false); }
-  }
-  return <details className="collection-settings"><summary>자동 수집 설정</summary><form onSubmit={submit}>
-    <label className="check-field"><input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />매일 자동으로 수집</label>
-    <label className="form-field">수집 시각<select value={hour} onChange={(e) => setHour(e.target.value)}>{Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{String(h).padStart(2, "0")}:00</option>)}</select></label>
-    <button className="secondary-button" disabled={busy}>{busy ? "저장 중…" : "저장"}</button>
-    <p className="form-hint">서버가 켜져 있어야 실행됩니다.</p>
-    {message && <p className="form-message" role="status">{message}</p>}{error && <p className="form-error" role="alert">{error}</p>}
-  </form></details>;
 }

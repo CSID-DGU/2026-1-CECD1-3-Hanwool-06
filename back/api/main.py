@@ -388,19 +388,6 @@ def collect(body: CollectionRequest, user=Depends(auth.current_user)):
         return collection.job_view(c, c.execute('SELECT * FROM collection_jobs WHERE id=?', (job_id,)).fetchone(), {m['id']: m for m in selected})
 
 
-class CollectionSettings(StrictModel):
-    enabled: bool = Field(strict=True)
-    hour: int = Field(ge=0, le=23, strict=True)
-
-
-@app.patch('/api/collection/settings')
-def collection_settings(body: CollectionSettings, user=Depends(auth.superadmin)):
-    with db.connect() as c:
-        c.execute("INSERT INTO settings VALUES('collection_schedule',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (json.dumps(body.model_dump()),))
-        db.audit(c, user['id'], 'collection_schedule', details=body.model_dump())
-        return collection.settings(c)
-
-
 @app.get('/api/users')
 def users(user=Depends(auth.superadmin)):
     with db.connect() as c:

@@ -11,8 +11,9 @@ and bills for active Arisu contracts, including newly registered bill-only contr
 The explicit range CLI uses `daily_enabled` for daily water/ridership collection.
 Other providers remain visible in the catalog but are not sent to Arisu.
 
-The web server owns the daily schedule (default 08:00 Asia/Seoul, configurable by a
-superadmin), persisted jobs, and manual updates. Registration/restoration queues a
+The web server owns the daily schedule (fixed at 08:00 Asia/Seoul), persisted jobs, and
+manual updates. To pause collection, set `COLLECTION_WORKER_ENABLED=false` on the server
+and restart it; queued jobs wait until it is enabled again. Registration/restoration queues a
 connection check automatically. A job shares one authenticated Arisu session across
 its meters. Empty results are not proof of an invalid customer number. Source records
 must identify the requested customer before a connection is verified. Errors and empty
@@ -104,7 +105,7 @@ result location can also be selected with `python -m back.ml.lightgbm.main --con
 The optional, manually dispatched Actions workflow uses a trusted self-hosted runner and persistent
 `APP_DATA_DIR` outside its checkout. Initialize its database and contract registry
 first and configure repository secrets and storage variables. Scheduling belongs to the
-web application so turning it off there also stops automatic Arisu collection. Source
+web application so setting `COLLECTION_WORKER_ENABLED=false` there also stops automatic Arisu collection. Source
 code is checked out from `main`; observations and
 snapshots remain in private persistent storage. There is no Git push or public artifact
 upload. Concurrent refresh jobs share one Actions concurrency group and the collection

@@ -1,6 +1,5 @@
 """Persistent collection queue and one daily KST run, owned by the API process."""
 import fcntl
-import json
 import logging
 import os
 import threading
@@ -11,6 +10,8 @@ from fastapi import HTTPException
 from . import auth, catalog, config, db
 
 KST = ZoneInfo('Asia/Seoul')
+# Fixed daily run; COLLECTION_WORKER_ENABLED=false pauses it. Old 'collection_schedule' rows are ignored.
+DAILY_HOUR = 8
 ACTIVE = ('queued', 'running')
 logger = logging.getLogger(__name__)
 
@@ -23,16 +24,14 @@ def configured():
 
 def settings(c, current=None):
     current = current or datetime.now(KST)
-    row = c.execute("SELECT value FROM settings WHERE key='collection_schedule'").fetchone()
-    value = json.loads(row[0]) if row else {'enabled': True, 'hour': 8}
-    next_run = current.replace(hour=value['hour'], minute=0, second=0, microsecond=0)
+    next_run = current.replace(hour=DAILY_HOUR, minute=0, second=0, microsecond=0)
     last = c.execute("SELECT value FROM settings WHERE key='collection_auto_day'").fetchone()
     if next_run <= current and last and last[0] == current.date().isoformat():
         next_run += timedelta(days=1)
     elif next_run < current:
         next_run = current
-    return value | {'timezone': 'Asia/Seoul', 'next_run_at': next_run.isoformat()
-                    if value['enabled'] and config.COLLECTION_WORKER_ENABLED else None}
+    return {'enabled': config.COLLECTION_WORKER_ENABLED, 'hour': DAILY_HOUR, 'timezone': 'Asia/Seoul',
+            'next_run_at': next_run.isoformat() if config.COLLECTION_WORKER_ENABLED else None}
 
 
 def enqueue(c, meter_ids, trigger, actor_id=None):
@@ -114,10 +113,9 @@ def status(user):
 
 def schedule_due(c, current=None):
     current = current or datetime.now(KST)
-    schedule = settings(c, current)
     day = current.date().isoformat()
     last = c.execute("SELECT value FROM settings WHERE key='collection_auto_day'").fetchone()
-    if not schedule['enabled'] or current.hour < schedule['hour'] or (last and last[0] == day):
+    if current.hour < DAILY_HOUR or (last and last[0] == day):
         return
     if c.execute("SELECT 1 FROM collection_jobs WHERE status IN ('queued','running')").fetchone():
         return
