@@ -524,37 +524,10 @@ class ApplicationTest(unittest.TestCase):
         with db.connect() as c:
             self.assertEqual([r[0] for r in c.execute('SELECT trigger FROM collection_jobs ORDER BY id')], ['automatic', 'manual'])
 
-    def test_monday_run_checks_bills_and_other_days_only_daily_usage(self):
-        with db.connect() as c:
-            c.execute("UPDATE meters SET daily_enabled=0 WHERE id='000000002'")   # 청구 전용 계량기
-        seen = []
-
-        def collect(result):
-            def run(meter, **kwargs):
-                seen.append((meter['id'], kwargs['include_bills']))
-                return result
-            return run
-
-        self.assertIsNone(self.schedule_at(8, day=22))   # 2026-09-22 화요일: 일일 관제 계량기의 일일 사용량만
-        self.finish_queued_job(collect({'status': 'failed', 'message': '아리수 서버의 응답 시간이 초과되었습니다.', 'retryable': True}), 8, 5, day=22)
-        self.assertIsNone(self.schedule_at(8, 35, day=22))   # 재시도도 그날 방식 그대로
-        self.finish_queued_job(collect({'status': 'success', 'message': '확인'}), 8, 40, day=22)
-        self.assertEqual(seen, [('000000001', False), ('000000001', False)])
-        seen.clear()
-        self.assertIsNone(self.schedule_at(8, day=28))   # 2026-09-28 월요일: 모든 계량기의 청구서까지
-        self.finish_queued_job(collect({'status': 'success', 'message': '확인'}), 8, 20, day=28)
-        self.assertEqual(seen, [('000000001', True), ('000000002', True)])
-        self.login()
-        manual = self.client.post('/api/collection', json={})   # 정보 업데이트는 요일과 관계없이 청구서까지
-        self.assertEqual(manual.status_code, 202, manual.text)
-        with db.connect() as c:
-            self.assertEqual([tuple(r) for r in c.execute('SELECT trigger,include_bills FROM collection_jobs ORDER BY id')],
-                             [('automatic', 0), ('automatic_retry', 0), ('automatic', 1), ('manual', 1)])
-
     def test_day_with_nothing_to_collect_settles_at_once(self):
         with db.connect() as c:
-            c.execute('UPDATE meters SET daily_enabled=0')
-        self.assertIsNone(self.schedule_at(8, day=22))   # 화요일인데 일일 관제 계량기가 없다
+            c.execute('UPDATE meters SET active=0')
+        self.assertIsNone(self.schedule_at(8, day=22))   # 켜진 아리수 계량기가 하나도 없는 날
         with db.connect() as c:
             self.assertEqual(c.execute('SELECT count(*) FROM collection_jobs').fetchone()[0], 0)
             self.assertEqual(c.execute("SELECT value FROM settings WHERE key='collection_auto_settled'").fetchone()[0], '2026-09-22')
@@ -587,13 +560,9 @@ class ApplicationTest(unittest.TestCase):
             self.assertEqual([(r[0], json.loads(r[1]).get('reason')) for r in c.execute("SELECT action,details FROM audit_log WHERE action LIKE 'collection_alert%' ORDER BY id")],
                              [('collection_alert_sent', None), ('collection_alert_failed', 'RuntimeError')])
 
-    def test_existing_collection_history_gains_retry_and_bill_flags(self):
+    def test_existing_collection_history_gains_retry_flag(self):
         with db.connect() as c:
             c.executescript('''DROP TABLE collection_items;
-                DROP TABLE collection_jobs;
-                CREATE TABLE collection_jobs(
-                  id INTEGER PRIMARY KEY,status TEXT NOT NULL,trigger TEXT NOT NULL,actor_id INTEGER REFERENCES users(id),
-                  created_at TEXT NOT NULL,started_at TEXT,finished_at TEXT);
                 CREATE TABLE collection_items(
                   job_id INTEGER NOT NULL REFERENCES collection_jobs(id),meter_id TEXT NOT NULL REFERENCES meters(id),
                   status TEXT NOT NULL DEFAULT 'queued',message TEXT NOT NULL DEFAULT '',started_at TEXT,finished_at TEXT,
@@ -605,7 +574,6 @@ class ApplicationTest(unittest.TestCase):
         db.init_db()
         with db.connect() as c:
             self.assertEqual(tuple(c.execute('SELECT status,retryable FROM collection_items').fetchone()), ('failed', 0))
-            self.assertEqual(c.execute('SELECT include_bills FROM collection_jobs').fetchone()[0], 1)   # 예전 작업은 청구서까지 받았다
 
     def test_collection_worker_keeps_partial_results_and_no_false_connection(self):
         self.login()

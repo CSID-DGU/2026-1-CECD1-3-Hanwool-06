@@ -68,7 +68,7 @@ def _result(status, message, daily_rows=0, bill_rows=0, daily_available=False, v
             "daily_available": daily_available, "connection_verified": verified, "retryable": retryable}
 
 
-def collect_meter(meter, *, progress=None, session=None, include_bills=True):
+def collect_meter(meter, *, progress=None, session=None):
     """A failure affects this contract only; successful source rows remain usable."""
     if meter.get("provider") != "arisu":
         return _result("failed", "현재 아리수 고객번호의 자동 조회만 지원합니다.")
@@ -93,7 +93,7 @@ def collect_meter(meter, *, progress=None, session=None, include_bills=True):
             logger.warning("Arisu session setup failed (%s)", type(exc).__name__)
             return _result("failed", "아리수에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.", retryable=transient(exc))
         try:
-            return _collect(meter | {"customer_number": cid}, session, notify, include_bills)
+            return _collect(meter | {"customer_number": cid}, session, notify)
         except Exception as exc:
             # Exception text can contain a remote URL or credentials. Log types only.
             logger.error("Unexpected incremental collection failure (%s)", type(exc).__name__)
@@ -103,7 +103,7 @@ def collect_meter(meter, *, progress=None, session=None, include_bills=True):
                 session.close()
 
 
-def _collect(meter, session, notify, include_bills=True):
+def _collect(meter, session, notify):
     cid, runtime = meter["customer_number"], config.DATA_DIR
     daily_enabled = bool(meter.get('daily_enabled'))
     state_path = runtime / "collection" / f"{cid}.json"
@@ -183,16 +183,14 @@ def _collect(meter, session, notify, include_bills=True):
             retry = retry or transient(exc)
     if gaps:   # a notice beside usable readings; with no usable reading at all, the source itself may be broken
         (notes if fresh else errors).append(f"{', '.join(gaps)} 아리수 검침값 누락·오류로 해당 관측을 제외했습니다")
+    notify("청구서를 조회하는 중입니다.")
     bills = []
     bill_end = today().strftime('%Y-%m')
     retries = state.get('bill_retry_windows', [])
     if 'bill_retry_windows' not in state and state.get('bill_retry_from'):
         retries = [(state['bill_retry_from'], bill_end)]
-    # A run without the weekly bill check keeps pending bill windows for that check.
-    windows = _bill_windows(meter['id'], bill_end, retries) if include_bills else []
-    failed_windows = list(windows) if include_bills else retries
-    if windows:
-        notify("청구서를 조회하는 중입니다.")
+    windows = _bill_windows(meter['id'], bill_end, retries)
+    failed_windows = list(windows)
     try:
         with db.connect() as conn:
             known_details = {(cid, r['period'], r['gubun'], r['notice_number']) for r in conn.execute(
@@ -265,9 +263,8 @@ def _collect(meter, session, notify, include_bills=True):
     if errors:
         message = "; ".join(dict.fromkeys(errors)) + ". 수집된 자료는 저장했고, 나머지는 다음 수집 때 다시 시도합니다."
     elif valid:
-        message = (f"청구 전용 계량기: 청구 내역 {len(bills)}건을 확인했습니다." if not daily_enabled
-                   else f"일일 사용량 {len(fresh)}건, 청구 내역 {len(bills)}건을 확인했습니다." if include_bills
-                   else f"일일 사용량 {len(fresh)}건을 확인했습니다. 청구서는 매주 월요일에 확인합니다.")
+        message = (f"일일 사용량 {len(fresh)}건, 청구 내역 {len(bills)}건을 확인했습니다." if daily_enabled
+                   else f"청구 전용 계량기: 청구 내역 {len(bills)}건을 확인했습니다.")
     else:
         message = "조회된 자료가 없습니다. 이 기간에 자료가 없거나, 이 계정으로 볼 수 없는 고객번호일 수 있습니다."
     if notes:

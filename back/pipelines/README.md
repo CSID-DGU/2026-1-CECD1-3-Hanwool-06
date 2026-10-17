@@ -6,9 +6,8 @@ Archived files are not runtime inputs. The initial risk dataset is maintained at
 `data/app_seed/risk/test_anomalies.csv`; new model results belong to `APP_DATA_DIR/model`.
 
 All collection uses registered contracts from the application database. Archived and
-inactive contracts are excluded. The API's incremental worker probes daily readings of active
-Arisu contracts every day, and their bills (bill-only contracts included) on the Monday run,
-manual updates and registration/restoration checks.
+inactive contracts are excluded. The API's incremental worker probes both daily readings
+and bills for active Arisu contracts, including newly registered bill-only contracts.
 The explicit range CLI uses `daily_enabled` for daily water/ridership collection.
 Other providers remain visible in the catalog but are not sent to Arisu.
 
@@ -16,9 +15,7 @@ The web server owns the daily schedule (fixed at 08:00 Asia/Seoul), persisted jo
 manual updates. Meters that failed on a network error (timeout, connection, HTTP 429/5xx) or
 were interrupted are retried twice, 30 minutes apart; a rejected login is never retried because
 each retry logs in again. When the day's run settles (`collection_auto_settled` in `settings`),
-active superadmins get one mail listing what still failed. Bills change monthly at most, so
-only the Monday run checks every meter's bills; other days collect the daily usage of
-daily-enabled meters, and manual updates always include bills.
+active superadmins get one mail listing what still failed.
 To pause collection, set `COLLECTION_WORKER_ENABLED=false` on the server
 and restart it; queued jobs wait until it is enabled again. Registration/restoration queues a
 connection check automatically. A job shares one authenticated Arisu session across
@@ -27,8 +24,8 @@ must identify the requested customer before a connection is verified. Errors and
 responses never delete previous values. The same customer cannot be registered twice.
 For a connection test, update an existing meter or use a separate temporary database.
 
-Incremental collection fills missing dates, rechecks the recent three months and, when it
-includes bills, the recent bill months, and probes the past twelve months for a new customer. Older empty water
+Incremental collection fills missing dates, rechecks the recent three months and recent
+bill months, and probes the past twelve months for a new customer. Older empty water
 months are retried weekly. New observations publish a snapshot; risk evaluation keeps
 its prior date until a model refresh. The Arisu update does not call the ridership API
 or train the model. Use the explicit CLI below for those operations.

@@ -309,24 +309,10 @@ class IncrementalTest(unittest.TestCase):
                 issues.append('2026-06-04')
             return []
         with patch.object(inc, 'fetch_month', side_effect=broken), patch.object(inc, 'collect_bills', return_value={'rows': [], 'errors': []}):
-            result = inc.collect_meter(self.meter, include_bills=False)
+            result = inc.collect_meter(self.meter)
         # with no usable reading at all the source itself may be broken: a failure that is mailed, not a notice
         self.assertEqual((result['status'], result['retryable']), ('failed', False))
         self.assertIn('2026-06-04 아리수 검침값 누락', result['message'])
-
-    def test_run_without_bill_check_collects_daily_usage_and_keeps_pending_bill_windows(self):
-        state = config.DATA_DIR / 'collection/000000001.json'
-        with patch.object(inc, 'fetch_month', return_value=[self.row()]), patch.object(inc, 'collect_bills',
-                return_value={'rows': [], 'errors': [{'start': '2025-07', 'error': 'ReadTimeout'}]}):
-            inc.collect_meter(self.meter)
-        pending = json.loads(state.read_text())['bill_retry_windows']
-        self.assertTrue(pending)
-        with patch.object(inc, 'fetch_month', return_value=[self.row()]), patch.object(inc, 'collect_bills') as bills:
-            result = inc.collect_meter(self.meter, include_bills=False)
-        bills.assert_not_called()
-        self.assertEqual((result['status'], result['daily_rows'], result['bill_rows']), ('success', 1, 0))
-        self.assertIn('청구서는 매주 월요일에 확인', result['message'])
-        self.assertEqual(json.loads(state.read_text())['bill_retry_windows'], pending)   # the Monday check still retries them
 
     def test_model_bill_baseline_adds_collected_bills_to_the_historical_export(self):
         path = config.DATA_DIR / 'raw/billing_i121/i121_bills/bills_long.csv'
