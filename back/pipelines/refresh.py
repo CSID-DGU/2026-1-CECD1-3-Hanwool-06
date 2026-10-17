@@ -320,6 +320,9 @@ def _run(args):
         except Exception as exc:
             report["errors"].append(f"model: {type(exc).__name__}: {exc}")
     write_json(runtime / "refresh_report.json", report)
+    # Everything this run produced is on disk; mirror the changed files to Object Storage (no-op when disabled).
+    from back.storage.hooks import after_refresh
+    after_refresh(runtime)
     return 1 if report["errors"] else 0
 
 

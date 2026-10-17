@@ -29,6 +29,16 @@ ALERT_FROM = os.getenv('ALERT_FROM', '') or SMTP_USER
 TODAY_OVERRIDE = os.getenv('TODAY_OVERRIDE', '').strip()
 COLLECTION_WORKER_ENABLED = os.getenv('COLLECTION_WORKER_ENABLED', 'true').lower() == 'true'
 DATE_INDEX = ROOT / 'data/processed/date_index.csv'
+# NCP Object Storage(S3 호환). 끄면(기본) 모든 보관 훅은 아무 일도 하지 않는다. 값은 환경변수로만 주고 코드에 적지 않는다.
+OBJECT_STORAGE_ENABLED = os.getenv('OBJECT_STORAGE_ENABLED', 'false').lower() == 'true'
+OBJECT_STORAGE_ENDPOINT = os.getenv('OBJECT_STORAGE_ENDPOINT', 'https://kr.object.ncloudstorage.com').strip()
+OBJECT_STORAGE_REGION = os.getenv('OBJECT_STORAGE_REGION', 'kr-standard').strip()
+OBJECT_STORAGE_BUCKET = os.getenv('OBJECT_STORAGE_BUCKET', '').strip()
+OBJECT_STORAGE_ACCESS_KEY = os.getenv('OBJECT_STORAGE_ACCESS_KEY', '') or os.getenv('NCP_ACCESS_KEY', '')
+OBJECT_STORAGE_SECRET_KEY = os.getenv('OBJECT_STORAGE_SECRET_KEY', '') or os.getenv('NCP_SECRET_KEY', '')
+OBJECT_STORAGE_PREFIX = os.getenv('OBJECT_STORAGE_PREFIX', 'mulsaemi').strip()
+OBJECT_STORAGE_ADDRESSING = os.getenv('OBJECT_STORAGE_ADDRESSING', 'path').strip().lower()
+OBJECT_STORAGE_DB_BACKUP_KEEP = int(os.getenv('OBJECT_STORAGE_DB_BACKUP_KEEP', '30'))
 
 def configured(value):
     return bool(value and not value.lower().startswith(('your_', 'sk-...')))
@@ -45,6 +55,15 @@ def validate_deployment():
         raise RuntimeError('APP_ENV는 development 또는 production이어야 합니다.')
     if not 1 <= SESSION_HOURS <= 24:
         raise RuntimeError('SESSION_HOURS는 1~24 사이여야 합니다.')
+    if OBJECT_STORAGE_ENABLED:
+        if not (OBJECT_STORAGE_BUCKET and OBJECT_STORAGE_ACCESS_KEY and OBJECT_STORAGE_SECRET_KEY):
+            raise RuntimeError('OBJECT_STORAGE_ENABLED=true 이면 OBJECT_STORAGE_BUCKET, OBJECT_STORAGE_ACCESS_KEY, OBJECT_STORAGE_SECRET_KEY 가 필요합니다.')
+        if not OBJECT_STORAGE_ENDPOINT.startswith('https://'):
+            raise RuntimeError('OBJECT_STORAGE_ENDPOINT 는 https 주소여야 합니다.')
+        if OBJECT_STORAGE_ADDRESSING not in ('path', 'virtual'):
+            raise RuntimeError('OBJECT_STORAGE_ADDRESSING 은 path 또는 virtual 이어야 합니다.')
+        if OBJECT_STORAGE_DB_BACKUP_KEEP < 0:
+            raise RuntimeError('OBJECT_STORAGE_DB_BACKUP_KEEP 은 0 이상이어야 합니다.')
     if APP_ENV != 'production':
         return
     if not COOKIE_SECURE:

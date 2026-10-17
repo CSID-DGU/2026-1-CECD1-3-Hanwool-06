@@ -9,7 +9,9 @@ from . import auth, config, db, static_page
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest='command', required=True)
-    commands.add_parser('backup').add_argument('destination', type=Path)
+    backup = commands.add_parser('backup')
+    backup.add_argument('destination', type=Path)
+    backup.add_argument('--upload', action='store_true', help='Object Storage(backups/sqlite/)에도 올린다. OBJECT_STORAGE_* 설정 필요')
     commands.add_parser('reset-password').add_argument('email')
     commands.add_parser('export-static', help='로그인 없이 열어 보는 한 파일짜리 화면 저장본').add_argument('destination', type=Path)
     args = parser.parse_args()
@@ -24,6 +26,14 @@ def main():
             source.backup(destination)
         target.chmod(0o600)
         print(f'백업 완료: {target}')
+        if args.upload:
+            from back.storage import StorageError, storage_from_config
+            from back.storage.sync import backup_database
+            try:
+                result = backup_database(config.APP_DB_PATH, storage_from_config(), keep=config.OBJECT_STORAGE_DB_BACKUP_KEEP)
+            except StorageError as error:
+                parser.error(str(error))
+            print(f"Object Storage 업로드 완료: {result['key']} ({result['size']} bytes)")
         return
     if args.command == 'export-static':
         try:

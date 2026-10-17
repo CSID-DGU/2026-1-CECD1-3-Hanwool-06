@@ -45,6 +45,10 @@ Configure `ARISU_USER_ID`, `ARISU_USER_PWD`, and `SEOUL_PSGR_KEY` in the server 
 or root `.env`. Environment values take priority. Legacy `I121_USER_ID/I121_USER_PWD`
 are accepted only as a credential fallback. No credentials are needed for fixture tests.
 
+When `OBJECT_STORAGE_ENABLED=true`, the end of each web collection job, `refresh` run and
+monthly ridership import copies changed files under `APP_DATA_DIR` to NCP Object Storage, and the
+API uploads one SQLite backup per day after the automatic run settles (`back/storage/README.md`).
+
 The ridership API serves only the most recent week. Older dates come from the Seoul Open
 Data monthly files (OA-12914, no key): `python -m back.pipelines.daily_ridership.monthly
 2026-05 2026-08`. It writes the same per-date files and applies the station/line rule of

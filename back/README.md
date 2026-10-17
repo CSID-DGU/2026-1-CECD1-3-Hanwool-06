@@ -4,6 +4,7 @@
 
 - `api/`: FastAPI, SQLite 등록부·계정·세션, 보호된 자료 조회, PDF/Excel, 분석·메일.
 - `pipelines/`: 아리수·승하차 수집과 모델 실행. `python -m back.pipelines.refresh --help`.
+- `storage/`: NCP Object Storage(S3 호환) 보관·백업·복원·마이그레이션. `python -m back.storage --help`. 설명은 [`storage/README.md`](storage/README.md).
 - `scripts/`: 현재 청구서 수집·연결 진단 도구와 운영 파이프라인에서 공유하는 ETL 함수.
 - `ml/lightgbm/`: 현재 사용하는 CPU 학습·검증·이상 탐지 코드.
 

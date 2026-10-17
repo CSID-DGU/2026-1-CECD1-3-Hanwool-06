@@ -128,6 +128,8 @@ def main() -> int:
                 print(f"{month}: 아직 올라오지 않은 달입니다.")
                 missing = True
             month = shift_month(month, 1)
+    from back.storage.hooks import after_refresh
+    after_refresh(RUNTIME)   # 받은 월별 원본과 날짜별 파일을 Object Storage에도 둔다(꺼져 있으면 아무 일도 하지 않음)
     return 1 if missing else 0
 
 

@@ -9,6 +9,8 @@
 | `front/` | 웹 화면 |
 | `back/api/` | API, 계정·계량기 관리, 자동 수집 예약 |
 | `back/pipelines/` | 아리수 사용량·청구서 수집, 승하차 수집, 모델 갱신(`refresh`) |
+| `back/storage/` | NCP Object Storage(S3 호환) 보관: 수집·모델 결과 복사, DB 백업, 복원, 마이그레이션 |
+| `docs/` | 서버 담당자 인수인계 |
 | `back/ml/lightgbm/` | 예측·이상탐지 모델 |
 | `data/app_seed/`, `data/processed/`, `data/billing/` | 초기 자료, 정제 자료, 계량기 매핑 |
 | `data/runtime/` | 운영 DB, 수집 결과, 모델 결과, 스냅샷 (비공개, git 제외) |
@@ -32,6 +34,10 @@ npm run dev       # 터미널 2: 화면 127.0.0.1:5173 (/api 는 8000번으로 �
 운영처럼 한 프로세스로 띄우려면 `npm run build && npm run start`(8000번에서 화면과 API를 함께 서비스)입니다. 두 명령 모두 활성화된 환경의 `python`을 씁니다. 공개 회원가입은 없고 담당자 계정은 관리자가 관리 화면에서 만듭니다. macOS에서 LightGBM이 `libomp.dylib`을 못 찾으면 `brew install libomp`를 실행합니다.
 
 운영 배포에서는 `APP_ENV=production`, `APP_COOKIE_SECURE=true`, `APP_ORIGINS`, `APP_ALLOWED_HOSTS`, `APP_DATA_DIR`를 실제 값으로 두고 HTTPS 프록시 뒤에서 8000번은 로컬에만 엽니다. DB는 SQLite 전용이라 RDS(PostgreSQL)로 바로 옮길 수 없습니다.
+
+## Object Storage 보관
+
+`OBJECT_STORAGE_ENABLED=true`와 버킷·인증키 환경변수를 넣으면 수집·모델 갱신 뒤 바뀐 파일을 NCP Object Storage에 같은 상대 경로로 복사하고, 자동 수집이 끝난 날 운영 DB 백업을 올립니다. 운영 DB는 로컬 SQLite 그대로입니다. 최초 이전은 `python -m back.storage migrate --dry-run`으로 계획을 보고 `--verify-download`로 실행하며, 새 서버에서는 `python -m back.storage restore $APP_DATA_DIR --db`로 되돌립니다. 어떤 명령도 로컬 파일을 지우지 않습니다. 자세한 키 구조와 명령은 [`back/storage/README.md`](back/storage/README.md), 서버 담당자용 정리는 [`docs/ncp-object-storage-handoff.md`](docs/ncp-object-storage-handoff.md)에 있습니다.
 
 ## 자료 갱신
 
@@ -77,7 +83,7 @@ npm run build
 ## 백업·계정
 
 ```sh
-python -m back.api.manage backup /private/backup/water.sqlite3    # 실행 중에도 안전한 SQLite 백업
+python -m back.api.manage backup /private/backup/water.sqlite3    # 실행 중에도 안전한 SQLite 백업 (--upload: Object Storage에도 올림)
 python -m back.api.manage reset-password admin@example.com        # 비밀번호 재설정(터미널에서 입력, 다음 로그인 때 변경 요구)
 ```
 

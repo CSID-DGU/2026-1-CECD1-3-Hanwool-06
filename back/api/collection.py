@@ -269,6 +269,10 @@ def _run_job(job_id, stop, collect_meter):
         if stop.is_set():
             c.execute("UPDATE collection_items SET status='interrupted',message='서버가 중지되었습니다. 정보 업데이트로 다시 시도하세요.',finished_at=? WHERE job_id=? AND status IN ('queued','running')", (db.now(), job_id))
         c.execute('UPDATE collection_jobs SET status=?,finished_at=? WHERE id=?', (state, db.now(), job_id))
+    if not stop.is_set():
+        # Collected files are complete on disk now; copy what changed to Object Storage (no-op when disabled, never raises).
+        from back.storage.hooks import after_collection_job
+        after_collection_job(job_id)
 
 
 def worker(stop):
@@ -302,6 +306,9 @@ def worker(stop):
                 if row:
                     run_job(row[0], stop)
                     continue
+                # Once the day's automatic run has settled, upload one database backup (no-op when storage is disabled).
+                from back.storage.hooks import daily_maintenance
+                daily_maintenance()
             except Exception as exc:
                 logger.error('Collection worker failed (%s)', type(exc).__name__)
             stop.wait(2)
