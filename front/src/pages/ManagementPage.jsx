@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { deleteMeter, getMeters, getUsers, restoreMeter, saveMeter, saveUser } from "../api.js";
 import { detailHref } from "./Detail/data.js";
 import CollectionPanel from "../components/CollectionPanel.jsx";
+import PasswordField from "../components/PasswordField.jsx";
 import { collectionLabel, collectionTime, isCollectionActive, meterCollectionState } from "../collection.js";
 
 export default function ManagementPage({ data, user, kind, onSaved, collection }) {
@@ -104,12 +105,19 @@ function EditorDialog({ title, children, onClose }) {
 
 function UserForm({ item, offices, onSaved }) {
   const [form, setForm] = useState({ email: "", name: "", role: "office_admin", office_ids: [], active: true, ...item, password: "" });
+  const [confirm, setConfirm] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const field = (key, value) => setForm((f) => ({ ...f, [key]: value }));
+  // 서버 정책과 같은 최소 12자. 확인 칸은 비밀번호를 넣을 때만 맞아야 한다(수정 화면에서 비워 두면 비밀번호를 바꾸지 않는다).
+  const mismatch = (form.password || confirm) && confirm !== form.password;
+  const passwordError = form.password.length > 0 && form.password.length < 12 ? "비밀번호는 12자 이상이어야 합니다." : "";
+  const confirmError = confirm && mismatch ? "비밀번호 확인이 일치하지 않습니다." : "";
   async function submit(e) {
     e.preventDefault(); setBusy(true); setError("");
     try {
+      if (passwordError) throw new Error(passwordError);
+      if (mismatch) throw new Error("비밀번호와 비밀번호 확인이 서로 다릅니다. 같은 값을 다시 입력하세요.");
       const body = { email: form.email.trim(), name: form.name.trim(), role: form.role, office_ids: form.role === "superadmin" ? [] : form.office_ids, active: form.active };
       if (form.password) body.password = form.password;
       if (form.role === "office_admin" && !form.office_ids.length) throw new Error("담당 사업소를 하나 이상 선택하세요.");
@@ -120,7 +128,10 @@ function UserForm({ item, offices, onSaved }) {
   return <form onSubmit={submit} className="editor-form">
     <label className="form-field">이름<input autoFocus required maxLength={80} value={form.name} onChange={(e) => field("name", e.target.value)} /></label>
     <label className="form-field">이메일<input type="email" required autoComplete="off" value={form.email} onChange={(e) => field("email", e.target.value)} /></label>
-    <label className="form-field">{item.id ? "비밀번호 초기화 (변경할 때만 입력)" : "초기 비밀번호"}<input type="password" required={!item.id} minLength={12} autoComplete="new-password" value={form.password} onChange={(e) => field("password", e.target.value)} /></label>
+    <PasswordField label={item.id ? "비밀번호 초기화 (변경할 때만 입력)" : "초기 비밀번호"} required={!item.id} minLength={12} maxLength={128} autoComplete="new-password"
+      value={form.password} onChange={(e) => field("password", e.target.value)} error={passwordError} />
+    <PasswordField label="비밀번호 확인" required={Boolean(form.password)} minLength={12} maxLength={128} autoComplete="new-password"
+      value={confirm} onChange={(e) => setConfirm(e.target.value)} error={confirmError} />
     <label className="form-field">역할<select value={form.role} onChange={(e) => field("role", e.target.value)}><option value="office_admin">사업소 관리자</option><option value="superadmin">총괄 관리자</option></select></label>
     {form.role === "office_admin" && <fieldset><legend>담당 사업소</legend><div className="office-checkboxes">{offices.map((office) => <label key={office.id} className="check-field"><input type="checkbox" checked={form.office_ids.some((id) => String(id) === String(office.id))} onChange={(e) => field("office_ids", e.target.checked ? [...form.office_ids, office.id] : form.office_ids.filter((id) => String(id) !== String(office.id)))} />{office.name}</label>)}</div></fieldset>}
     <label className="check-field"><input type="checkbox" checked={form.active} onChange={(e) => field("active", e.target.checked)} />활성 계정</label>

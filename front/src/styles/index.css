@@ -97,6 +97,14 @@ small { font-size: 12px; }
 .form-field input[readonly] { background: var(--ground); color: var(--sub); }
 .form-field input:focus, .form-field select:focus { outline: 2px solid var(--brand); outline-offset: -1px; }
 .form-field small { color: var(--mute); font-weight: 400; }
+/* 비밀번호 입력칸: 오른쪽 끝에 표시/숨김 글자 버튼 */
+.password-input { position: relative; }
+.password-input input { padding-right: 56px; }
+.password-toggle { position: absolute; top: 50%; right: 6px; padding: 2px 8px; border: 0; border-radius: var(--radius); background: none; color: var(--sub); font-size: 12px; font-weight: 600; transform: translateY(-50%); }
+.password-toggle:hover { background: var(--ground); color: var(--ink); }
+.password-toggle[aria-pressed="true"] { color: var(--brand); }
+.password-field input[aria-invalid="true"] { border-color: var(--alert); }
+.password-field .password-error { color: var(--alert); }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .check-field { display: flex; align-items: center; gap: 8px; }
 .check-field input { flex-shrink: 0; width: 16px; height: 16px; accent-color: var(--brand); }
