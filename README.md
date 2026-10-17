@@ -11,6 +11,7 @@
 | `back/pipelines/` | 아리수 사용량·청구서 수집, 승하차 수집, 모델 갱신(`refresh`) |
 | `back/storage/` | NCP Object Storage(S3 호환) 보관: 수집·모델 결과 복사, DB 백업, 복원, 마이그레이션 |
 | `docs/` | 서버 담당자 인수인계 |
+| `deploy/` | 운영 서버 설정: 03:30 백업, 08:05 승하차·모델 갱신 타이머, 서비스·Nginx, 운영 설정 항목 |
 | `back/ml/lightgbm/` | 예측·이상탐지 모델 |
 | `data/app_seed/`, `data/processed/`, `data/billing/` | 초기 자료, 정제 자료, 계량기 매핑 |
 | `data/runtime/` | 운영 DB, 수집 결과, 모델 결과, 스냅샷 (비공개, git 제외) |
