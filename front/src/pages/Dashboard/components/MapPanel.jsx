@@ -34,23 +34,28 @@ function StationSelection({ station, billingOnly, onClose }) {
 export default function MapPanel({ stationMap, locations, billingOnly = false, children }) {
   const [zoom, setZoom] = useState(1);
   const [selected, setSelected] = useState(null);
+  const [dragging, setDragging] = useState(false);
   const viewport = useRef(null);
   const drag = useRef(null);
   const groups = buildMapGroups([...stationMap.values()], locations);
   const mapped = groups.filter((s) => s.position);
   const unplaced = groups.filter((s) => !s.position);
   const active = groups.find((s) => s.id === selected);
+  // 끌어서 옮기기는 확대해서 스크롤할 내용이 있을 때만 뜻이 있다. 100%에서는 끌 수 없으므로 손 모양 커서도 보이지 않는다.
+  const draggable = zoom > 1;
   const fit = () => { setZoom(1); viewport.current?.scrollTo(0, 0); };
   const startDrag = (e) => {
-    if (e.pointerType !== "mouse" || e.target.closest("[data-station]")) return;
+    if (!draggable || e.pointerType !== "mouse" || e.button !== 0 || e.target.closest("[data-station]")) return;
     drag.current = { x: e.clientX, y: e.clientY, left: viewport.current.scrollLeft, top: viewport.current.scrollTop };
     e.currentTarget.setPointerCapture(e.pointerId);
+    setDragging(true);
   };
   const moveDrag = (e) => {
     if (!drag.current) return;
     viewport.current.scrollLeft = drag.current.left - e.clientX + drag.current.x;
     viewport.current.scrollTop = drag.current.top - e.clientY + drag.current.y;
   };
+  const endDrag = () => { drag.current = null; setDragging(false); };
   return <><section className="map-panel" aria-label="지하철 노선도">
     <SectionTitle as="h2" right={<div className="zoom-controls">
       <button type="button" onClick={() => setZoom((v) => Math.max(1, v - .5))} disabled={zoom <= 1} aria-label="노선도 축소">−</button>
@@ -58,7 +63,9 @@ export default function MapPanel({ stationMap, locations, billingOnly = false, c
       <button type="button" onClick={() => setZoom((v) => Math.min(4, v + .5))} disabled={zoom >= 4} aria-label="노선도 확대">+</button>
       <button type="button" onClick={fit}>전체 보기</button>
     </div>}>노선도</SectionTitle>
-    <div ref={viewport} className="metro-viewport" tabIndex={0} aria-label="노선도. 확대한 뒤 스크롤하거나 끌어서 옮길 수 있습니다." onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={() => { drag.current = null; }} onPointerCancel={() => { drag.current = null; }}>
+    <div ref={viewport} className={`metro-viewport ${draggable ? "is-draggable" : ""} ${dragging ? "is-dragging" : ""}`} tabIndex={0}
+      aria-label={draggable ? "노선도. 스크롤하거나 끌어서 옮길 수 있습니다." : "노선도. 확대하면 스크롤하거나 끌어서 옮길 수 있습니다."}
+      onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}>
       <svg className="metro-canvas" viewBox="0 0 2551 2123" style={{ width: `${zoom * 100}%`, height: `${zoom * 100}%` }} role="group" aria-label="서울 지하철 노선도와 계량기가 있는 역">
         <image href="/metro_map_rectangle.png" width="2551" height="2123" aria-hidden="true" />
         {mapped.map((station) => {

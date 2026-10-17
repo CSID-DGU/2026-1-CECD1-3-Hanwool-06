@@ -213,8 +213,12 @@ th.is-sorted .th-sort, th.is-sorted .th-sort-mark { color: var(--brand); }
 .zoom-controls { display: flex; align-items: center; gap: 4px; }
 .zoom-controls button { min-width: 28px; height: 28px; padding: 0 8px; border: 1px solid var(--rule); border-radius: var(--radius); background: var(--paper); font-size: 13px; }
 .zoom-controls span { min-width: 40px; color: var(--sub); font-size: 12px; text-align: center; font-variant-numeric: tabular-nums; }
-.metro-viewport { aspect-ratio: 2551 / 2123; overflow: auto; border: 1px solid var(--rule); border-radius: var(--radius); background: var(--paper); cursor: grab; overscroll-behavior: contain; }
-.metro-viewport:active { cursor: grabbing; }
+/* 커서: 기본은 보통 화살표, 확대해서 끌 수 있을 때만 손 모양, 실제로 끌고 있을 때만 쥔 손. 역 노드는 항상 손가락(pointer) */
+/* 100%에서는 스크롤 상자가 아니라 휠이 그대로 페이지 스크롤로 간다. 확대했을 때만 안에서 스크롤하고 페이지로 번지지 않게 한다 */
+.metro-viewport { aspect-ratio: 2551 / 2123; overflow: hidden; border: 1px solid var(--rule); border-radius: var(--radius); background: var(--paper); cursor: default; }
+.metro-viewport.is-draggable { overflow: auto; overscroll-behavior: contain; cursor: grab; }
+.metro-viewport.is-dragging { cursor: grabbing; }
+.metro-viewport.is-dragging .metro-node { cursor: grabbing; }
 .metro-canvas { display: block; max-width: none; user-select: none; }
 .metro-node { cursor: pointer; }
 .metro-node-hit { fill: transparent; }
