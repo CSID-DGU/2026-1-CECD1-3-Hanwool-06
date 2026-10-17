@@ -136,7 +136,6 @@ button.line-badge[aria-pressed="false"] { background: var(--paper); box-shadow: 
 .file-action [aria-disabled="true"] { cursor: wait; opacity: .6; }
 .file-error { max-width: 300px; color: var(--alert); font-size: 12px; }
 .export-note { color: var(--mute); font-size: 12px; }
-.export-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; color: var(--sub); font-size: 13px; }
 
 /* 대화상자 */
 .editor-dialog, .ag-dialog { width: calc(100% - 32px); max-width: 560px; max-height: 90vh; padding: 0; border: 1px solid var(--rule); border-radius: 6px; box-shadow: 0 12px 40px rgba(16, 24, 40, .18); color: var(--ink); }
@@ -166,26 +165,39 @@ button.line-badge[aria-pressed="false"] { background: var(--paper); box-shadow: 
 .view-tabs button, .management-tabs button { margin-bottom: -1px; padding: 8px 14px; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--sub); font-size: 15px; font-weight: 600; }
 .view-tabs button[aria-pressed="true"], .management-tabs button[aria-pressed="true"] { border-bottom-color: var(--brand); color: var(--brand); }
 .view-tabs button span { margin-left: 4px; color: var(--mute); font-weight: 400; font-variant-numeric: tabular-nums; }
-.view-tabs + .filter-bar { margin-top: -8px; }
 
-.filter-bar { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 12px 20px; }
-.filter-search { flex: 1 1 220px; max-width: 300px; }
-.filter-bar select { min-width: 150px; }
-.filter-group { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.filter-label { color: var(--sub); font-size: 13px; font-weight: 600; }
-.line-filter, .risk-filter { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; min-height: 36px; }
-.line-filter button { width: 28px; height: 28px; padding: 0; border: 0; border-radius: 50%; background: var(--paper); box-shadow: inset 0 0 0 2px var(--line-color); color: var(--line-color); font-size: 13px; font-weight: 700; line-height: 1; }
-.line-filter button[aria-pressed="true"] { background: var(--line-color); color: #fff; }
-.line-filter .line-filter-all { width: auto; padding: 0 10px; border-radius: 14px; box-shadow: inset 0 0 0 1px var(--rule); color: var(--sub); font-weight: 600; }
-.line-filter .line-filter-all[aria-pressed="true"] { background: var(--ink); box-shadow: none; color: #fff; }
-.risk-filter button { height: 28px; padding: 0 10px; border: 1px solid var(--rule); border-radius: var(--radius); background: var(--paper); color: var(--sub); font-size: 13px; font-weight: 600; white-space: nowrap; }
-.risk-filter button span { margin-left: 5px; color: var(--mute); font-weight: 400; font-variant-numeric: tabular-nums; }
-.risk-filter .risk-alert { color: var(--alert); }
-.risk-filter .risk-warn { color: var(--warn); }
-.risk-filter .risk-ok { color: var(--ok); }
-.risk-filter button[aria-pressed="true"] { border-color: var(--ink); background: var(--ink); color: #fff; }
-.risk-filter button[aria-pressed="true"] span { color: #d5d9e0; }
-.filter-reset { align-self: center; margin-left: auto; }
+/* 계량기 목록: 검색·초기화는 표 위에, 정렬·조건은 머리글 안에 */
+.table-toolbar { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 8px 16px; margin-bottom: 12px; }
+.table-search { flex: 1 1 240px; max-width: 320px; }
+.table-toolbar .form-hint { flex: 1 1 260px; align-self: center; }
+.table-toolbar > .text-button { align-self: center; margin-left: auto; }
+/* 표 상자 높이와 열 너비를 고정해, 검색어나 조건으로 행이 바뀌어도 표가 늘었다 줄었다 하지 않는다 */
+.table-wrap--fixed { height: 520px; scrollbar-gutter: stable; }
+.data-table--controls { table-layout: fixed; }
+/* 일일 관제 표는 고정 폭 열의 합(720px)에 역명 열 최소 폭을 더한 만큼은 확보하고, 좁은 창에서는 상자 안에서 가로 스크롤한다 */
+.table-panel .data-table--wide { min-width: 1000px; }
+.data-table--controls th, .data-table--controls td { overflow-wrap: anywhere; }
+/* 머리글 컨트롤: 글자(12px·회색·굵게)와 같은 모양으로 한 줄에 둔다. 정렬 열은 화살표, 조건 열은 자체 드롭다운(▾) */
+.data-table--controls thead th { vertical-align: middle; }
+.th-sort, .th-dropdown { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 2px 4px 2px 0; border: 0; border-radius: 2px; background: none; color: var(--sub); font: inherit; font-size: 12px; font-weight: 600; line-height: 20px; white-space: nowrap; cursor: pointer; }
+.th-sort:hover, .th-dropdown:hover { color: var(--ink); }
+.th-sort-mark { width: 10px; color: var(--mute); font-size: 10px; text-align: center; }
+th.is-sorted .th-sort, th.is-sorted .th-sort-mark { color: var(--brand); }
+.th-dropdown .dd-button-text { overflow: hidden; text-overflow: ellipsis; }
+.th-dropdown.is-active, .th-dropdown.is-active .dd-mark { color: var(--brand); }
+.th-sort:focus-visible, .th-dropdown:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+/* 드롭다운(components/Dropdown.jsx): 버튼 모양은 쓰는 곳이 정하고, 펼친 목록은 여기서 정한다 */
+.dd-button { display: inline-flex; align-items: center; gap: 6px; }
+.dd-mark { flex-shrink: 0; width: 6px; height: 6px; margin: 0 3px 3px 0; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; color: var(--mute); transform: rotate(45deg); }
+.dd-button:hover .dd-mark { color: var(--ink); }
+.dd-button[aria-expanded="true"] .dd-mark { margin: 3px 3px 0 0; transform: rotate(-135deg); }
+.dd-list { position: fixed; z-index: 100; max-height: 370px; min-width: 120px; max-width: min(360px, calc(100vw - 32px)); margin: 0; padding: 0; overflow-y: auto; list-style: none; border: 1px solid var(--rule); border-radius: 0 0 var(--radius) var(--radius); background: var(--paper); box-shadow: 0 6px 16px rgba(16, 24, 40, .12); outline: none; }
+.dd-option { position: relative; display: flex; align-items: center; min-height: 36px; padding: 8px 12px; border-bottom: 1px solid var(--rule-soft); color: var(--ink); font-size: 13px; line-height: 1.4; cursor: pointer; }
+.dd-option:last-child { border-bottom: 0; }
+.dd-option.is-cursor { background: #fafbfc; }
+.dd-option[aria-selected="true"] { color: var(--brand); font-weight: 600; }
+.empty-state .text-button { margin-left: 6px; font-size: 13px; }
 
 .workspace { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 24px; align-items: start; }
 .map-panel, .side-panel { min-width: 0; }
@@ -247,8 +259,8 @@ button.line-badge[aria-pressed="false"] { background: var(--paper); box-shadow: 
   h1 { font-size: 20px; }
   .brand strong { display: none; }
   .account-actions { gap: 12px; }
-  .filter-search { max-width: none; flex-basis: 100%; }
-  .filter-reset { margin-left: 0; }
+  .table-search { max-width: none; flex-basis: 100%; }
+  .table-toolbar > .text-button { margin-left: 0; }
   .form-grid { grid-template-columns: 1fr; }
   .map-legend > span:last-child { margin-left: 0; }
 }

@@ -35,6 +35,50 @@ export function buildDashboard(data) {
   return { stations, offices: data.offices || [] };
 }
 
+// 계량기 목록 정렬 키: name-asc | name-desc | date-desc | date-asc.
+// 기준일은 일일 관제에서는 사용량 날짜(없으면 분석일), 청구 전용에서는 최근 청구월이다.
+export const defaultSort = "name-asc";
+// 머리글을 눌렀을 때 다음 정렬. 같은 열이면 방향만 바꾸고, 다른 열이면 그 열의 기본 방향(이름 오름차순, 기준일 최신순)으로 간다.
+export function nextSort(current, column) {
+  const [key, direction] = String(current || defaultSort).split("-");
+  if (key === column) return `${column}-${direction === "asc" ? "desc" : "asc"}`;
+  return column === "date" ? "date-desc" : "name-asc";
+}
+const collator = new Intl.Collator("ko", { numeric: true, sensitivity: "base" });
+const compareText = (a, b) => collator.compare(String(a ?? ""), String(b ?? ""));
+
+// 실제 날짜로 비교할 수 있는 시각(ms). 비어 있거나 YYYY-MM(-DD) 형식이 아니면 null.
+export function referenceTime(station, billingOnly = false) {
+  const raw = billingOnly ? station.latestBillMonth : station.dailyDate || station.riskDate;
+  if (!raw) return null;
+  const match = /^(\d{4})-(\d{2})(?:-(\d{2}))?$/.exec(String(raw));
+  if (!match) return null;
+  const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3] || 1)];
+  const time = Date.UTC(year, month - 1, day);
+  const date = new Date(time);
+  // 13월이나 2월 30일처럼 달력에 없는 날짜는 Date 가 다음 달로 넘겨 버리므로 되읽어 확인한다.
+  if (!Number.isFinite(time) || date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null;
+  return time;
+}
+
+// 원본 배열은 바꾸지 않는다. 이름이 같으면 계량기 이름·고객번호 순, 기준일이 없는 계량기는 어느 방향이든 뒤로 간다.
+export function sortStations(stations, sortKey = defaultSort, billingOnly = false) {
+  const byName = (a, b) => compareText(a.name, b.name) || compareText(a.displayName, b.displayName) || compareText(a.customerNo, b.customerNo);
+  const list = [...stations];
+  if (sortKey === "name-desc") return list.sort((a, b) => -compareText(a.name, b.name) || compareText(a.displayName, b.displayName) || compareText(a.customerNo, b.customerNo));
+  if (sortKey === "date-desc" || sortKey === "date-asc") {
+    const direction = sortKey === "date-desc" ? -1 : 1;
+    return list.sort((a, b) => {
+      const ta = referenceTime(a, billingOnly), tb = referenceTime(b, billingOnly);
+      if (ta == null && tb == null) return byName(a, b);
+      if (ta == null) return 1;
+      if (tb == null) return -1;
+      return (ta - tb) * direction || byName(a, b);
+    });
+  }
+  return list.sort(byName);
+}
+
 export function buildMapGroups(stations, locations = {}) {
   const groups = new Map();
   const rank = { billing_only: -2, pending: -1, analysis_pending: 0, ok: 1, unknown: 2, warn: 3, alert: 4 };

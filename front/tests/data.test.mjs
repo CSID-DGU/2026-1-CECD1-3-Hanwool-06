@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { billGroundwater, billLabel, billNoticeNumber, billUsage, billWindow, buildRisk, buildStations, chartRange, detailHref, latestDate, monthCells, shiftMonth, signedPct } from "../src/pages/Detail/data.js";
-import { buildDashboard, buildMapGroups } from "../src/pages/Dashboard/dashboardData.js";
+import { buildDashboard, buildMapGroups, defaultSort, nextSort, referenceTime, sortStations } from "../src/pages/Dashboard/dashboardData.js";
 import { deleteMeter, exportUrl, getData, getMeters, request, restoreMeter, setCsrfToken, startCollection, waitForDownload } from "../src/api.js";
 import { collectionNeedsRefresh, collectionTime, isCollectionActive, meterCollectionState } from "../src/collection.js";
 import { statisticsPeriod } from "../src/pages/statisticsData.js";
@@ -21,6 +21,56 @@ test("dashboard preserves separate usage and risk dates when collection is newer
   assert.equal(stations[0].usage, 0);
   assert.equal(stations[0].dailyDate, "2026-09-22");
   assert.equal(stations[0].riskDate, "2026-06-13");
+});
+
+test("meter list sorts by Korean name both ways with stable tie-breaks and leaves the source array alone", () => {
+  const rows = [
+    { id: "c", name: "잠실역", displayName: "대합실", customerNo: "000000003" },
+    { id: "a", name: "강동역", displayName: "화장실", customerNo: "000000002" },
+    { id: "b", name: "강동역", displayName: "대합실", customerNo: "000000001" },
+    { id: "d", name: "시청역", displayName: "기본", customerNo: "000000010" },
+    { id: "e", name: "시청역", displayName: "기본", customerNo: "000000009" },
+  ];
+  const snapshot = JSON.stringify(rows);
+  assert.deepEqual(sortStations(rows, "name-asc").map((r) => r.id), ["b", "a", "e", "d", "c"]);
+  assert.deepEqual(sortStations(rows, defaultSort).map((r) => r.id), sortStations(rows, "name-asc").map((r) => r.id));
+  // 이름만 내림차순이고 같은 역 안의 계량기 순서는 그대로다
+  assert.deepEqual(sortStations(rows, "name-desc").map((r) => r.id), ["c", "e", "d", "b", "a"]);
+  assert.equal(JSON.stringify(rows), snapshot);
+  assert.deepEqual(sortStations(rows, "unknown-key").map((r) => r.id), ["b", "a", "e", "d", "c"]);
+});
+
+test("header clicks toggle direction on the same column and start the other column at its default", () => {
+  assert.equal(nextSort("name-asc", "name"), "name-desc");
+  assert.equal(nextSort("name-desc", "name"), "name-asc");
+  assert.equal(nextSort("name-asc", "date"), "date-desc");
+  assert.equal(nextSort("date-desc", "date"), "date-asc");
+  assert.equal(nextSort("date-asc", "name"), "name-asc");
+  assert.equal(nextSort(undefined, "date"), "date-desc");
+});
+
+test("meter list date sort compares real dates, uses the analysis date as fallback and keeps missing dates last", () => {
+  const rows = [
+    { id: "jan", name: "가역", displayName: "", customerNo: "1", dailyDate: "2026-01-31", riskDate: "" },
+    { id: "feb", name: "나역", displayName: "", customerNo: "2", dailyDate: "2026-02-01", riskDate: "" },
+    { id: "none", name: "다역", displayName: "", customerNo: "3", dailyDate: "", riskDate: "" },
+    { id: "risk", name: "라역", displayName: "", customerNo: "4", dailyDate: "", riskDate: "2025-12-31" },
+    { id: "bad", name: "마역", displayName: "", customerNo: "5", dailyDate: "2026/03/01", riskDate: "" },
+    { id: "dec", name: "바역", displayName: "", customerNo: "6", dailyDate: "2025-12-31", riskDate: "" },
+  ];
+  assert.deepEqual(sortStations(rows, "date-desc").map((r) => r.id), ["feb", "jan", "risk", "dec", "none", "bad"]);
+  assert.deepEqual(sortStations(rows, "date-asc").map((r) => r.id), ["risk", "dec", "jan", "feb", "none", "bad"]);
+  assert.equal(referenceTime({ dailyDate: "2026-09-30" }) < referenceTime({ dailyDate: "2026-10-01" }), true);
+  assert.equal(referenceTime({ dailyDate: "2026-13-01" }), null);
+  assert.equal(referenceTime({ dailyDate: "" , riskDate: "" }), null);
+  // 청구 전용 보기는 최근 청구월(YYYY-MM)로 비교한다
+  const bills = [
+    { id: "old", name: "가역", displayName: "", customerNo: "1", latestBillMonth: "2025-09" },
+    { id: "new", name: "나역", displayName: "", customerNo: "2", latestBillMonth: "2026-08" },
+    { id: "none", name: "다역", displayName: "", customerNo: "3", latestBillMonth: "" },
+  ];
+  assert.deepEqual(sortStations(bills, "date-desc", true).map((r) => r.id), ["new", "old", "none"]);
+  assert.deepEqual(sortStations(bills, "date-asc", true).map((r) => r.id), ["old", "new", "none"]);
 });
 
 test("registered meters retain same-line contracts, empty bills and distinct providers", () => {
