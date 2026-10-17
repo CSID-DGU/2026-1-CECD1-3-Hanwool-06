@@ -1,5 +1,6 @@
 """Use the same private snapshot and registry as the dashboard, scoped before analysis."""
-from datetime import date as Date
+from datetime import date as Date, timedelta
+from statistics import median
 from back.pipelines.common import today
 from . import catalog, config, db
 
@@ -56,13 +57,38 @@ def find_one(meter_id, date=None, office_ids=None):
     return next((i for i in anomalies_on(date, True, office_ids) if i['meter_id'] == meter_id), None)
 
 
-def station_history(meter_id, date, office_ids=None, days=7):
+def analysis_context(meter_id, date, office_ids=None, days=28):
+    """Recent days and usual levels for cause analysis; the levels are computed here, not by the model."""
     with db.connect() as c:
         meter = next((m for m in catalog.list_meters(c, office_ids) if m['id'] == meter_id), None)
     if not meter or not meter['active']:
-        return []
+        return None
     daily, risk = catalog.data_sources()
     if catalog.meter_data_mode(meter, daily) != 'daily':
-        return []
-    rows = sorted((r for r in risk.get(meter['customer_number'], []) if r['date'] <= date), key=lambda r: r['date'])[-days:]
-    return [item_from_row(meter, row) for row in rows]
+        return None
+    entry = daily.get(meter['customer_number'], {})
+    scored = {r['date']: r for r in risk.get(meter['customer_number'], [])}
+    errors = {day for day, r in scored.items() if r.get('err') in (True, 'true', 'True', 1)}
+    # A scored day shows the value the screen and facts use; an invalid reading is no usage level at all.
+    usage = {r['date']: r['value'] for r in entry.get('usage', [])} | {
+        day: catalog.number(r.get('actual')) for day, r in scored.items() if catalog.number(r.get('actual')) is not None}
+    usage = {day: value for day, value in usage.items() if day not in errors}
+    riders = {r['date']: round(r['value']) for r in entry.get('ridership', []) if r['value'] is not None}   # people, not 72326.0
+    end = Date.fromisoformat(date)
+    history = []
+    for day in (end - timedelta(days=n) for n in range(days - 1, -1, -1)):
+        row, pred = scored.get(day.isoformat(), {}), catalog.number(scored.get(day.isoformat(), {}).get('pred'))
+        history.append({'날짜': day.isoformat(), '요일': '월화수목금토일'[day.weekday()], '사용량_톤': usage.get(day.isoformat()),
+                        '예측_톤': None if pred is None else round(pred, 1),
+                        '심각도': '자료 확인' if day.isoformat() in errors else row.get('severity'),
+                        '승하차_명': riders.get(day.isoformat())})
+
+    def usual(values, digits=1):
+        values = [v for v in values if v is not None]
+        return round(median(values), digits) if values else None
+    weeks = [(end - timedelta(weeks=n)).isoformat() for n in range(1, 9)]
+    return {'역': meter['station_name'], '호선': meter['line'], 'history': history, 'baseline': {
+        '같은_요일_지난_8주_사용량_중앙값': usual(usage.get(d) for d in weeks),
+        '지난_28일_사용량_중앙값': usual(r['사용량_톤'] for r in history[:-1]),
+        '같은_요일_지난_8주_승하차_중앙값': usual((riders.get(d) for d in weeks), None),
+        '당일_승하차_명': riders.get(date)}}

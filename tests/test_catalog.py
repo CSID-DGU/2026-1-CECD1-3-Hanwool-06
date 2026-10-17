@@ -149,7 +149,7 @@ class CatalogCheck(unittest.TestCase):
             self.assertEqual(payload['status']['counts'], {'daily': 0, 'billing_only': 0, 'pending': 0})
             self.assertEqual(data_access.reference_date(), '2026-08-31')
             self.assertEqual(data_access.anomalies_on('2026-09-22'), [])
-            self.assertEqual(data_access.station_history('000000001', '2026-09-22'), [])
+            self.assertIsNone(data_access.analysis_context('000000001', '2026-09-22'))
             with db.connect() as conn:
                 conn.execute("UPDATE meters SET deleted_at=NULL,active=1 WHERE id='000000001'")
             restored = catalog.payload(['가사업소'])

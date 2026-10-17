@@ -13,5 +13,7 @@
 .ag-cause { margin-top: 10px; padding: 12px; background: var(--ground); font-size: 13px; }
 .ag-cause p { margin: 0 0 6px; }
 .ag-cause p:last-child { margin-bottom: 0; }
-.ag-cause ul { margin: 0 0 8px; padding-left: 18px; color: var(--sub); }
+.ag-cause ul, .ag-cause ol { margin: 0 0 8px; padding-left: 18px; color: var(--sub); }
+.ag-cause ol { color: var(--text); }
+.ag-cause .ag-cause-label { margin: 8px 0 4px; font-weight: 600; }
 .ag-cause a { color: var(--brand); text-decoration: underline; }

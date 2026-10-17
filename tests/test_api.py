@@ -346,7 +346,7 @@ class ApplicationTest(unittest.TestCase):
         for route in ('analyze', 'alert'):
             response = manager.post(f'/api/{route}', json={'meter_id': alias_id, 'date': '2026-09-01'})
             self.assertEqual(response.status_code, 404, response.text)
-        self.assertEqual(data_access.station_history(alias_id, '2026-09-01', ['동부']), [])
+        self.assertIsNone(data_access.analysis_context(alias_id, '2026-09-01', ['동부']))
         manager.close()
 
     def test_collection_permissions_queue_and_recoverable_deletion(self):
@@ -704,7 +704,7 @@ class ApplicationTest(unittest.TestCase):
             self.assertEqual(self.client.get('/api/anomalies?date=2026-09-01').json()['items'], [])
             for route in ('analyze', 'alert'):
                 self.assertEqual(self.client.post(f'/api/{route}', json={'meter_id': '000000002', 'date': '2026-09-01'}).status_code, 404)
-            self.assertEqual(data_access.station_history('000000002', '2026-09-01'), [])
+            self.assertIsNone(data_access.analysis_context('000000002', '2026-09-01'))
             # A collected row without an actual value still is not daily water data.
             daily['000000002']['usage'] = [{'date': '2026-09-01', 'value': None}]
 
@@ -787,11 +787,11 @@ class ApplicationTest(unittest.TestCase):
     def test_invalid_model_response_uses_safe_failure_instead_of_react_objects(self):
         self.login()
         valid = {'primary_cause': '원자료와 운영 현황 확인이 필요합니다.', 'confidence': '낮음',
-                 'recommendation': '사용량 원자료를 확인하세요.', 'reasons': ['관측값의 변동'],
+                 'recommendation': ['사용량 원자료를 확인하세요.', '밸브 개폐 기록을 확인하세요.'], 'reasons': ['관측값의 변동'],
                  'events': [{'title': '관련 정보', 'date': '2026-08-31', 'source': 'https://example.com/info'}]}
         service = Mock()
         with patch.object(config, 'OPENAI_API_KEY', 'mock'), patch.object(main.agent, 'OpenAI', return_value=service):
-            for invalid in ({'confidence': {'level': 'low'}}, {'recommendation': ['원자료 확인']},
+            for invalid in ({'confidence': {'level': 'low'}}, {'recommendation': [{'step': '원자료 확인'}]},
                             {'reasons': [{'text': '자료 확인'}]}, {'is_calendar_effect': 'false'},
                             {'events': [{'title': {'name': '행사'}, 'source': 'https://example.com'}]}):
                 service.responses.create.return_value.output_text = json.dumps(valid | invalid, ensure_ascii=False)
@@ -801,6 +801,33 @@ class ApplicationTest(unittest.TestCase):
             service.responses.create.return_value.output_text = json.dumps(valid, ensure_ascii=False)
             response = self.client.post('/api/analyze', json={'meter_id': '000000001'}).json()
             self.assertEqual(response['analysis'], valid)
+            # A single sentence still shows, as a one-step list.
+            service.responses.create.return_value.output_text = json.dumps(valid | {'recommendation': '원자료를 확인하세요.'}, ensure_ascii=False)
+            response = self.client.post('/api/analyze', json={'meter_id': '000000001'}).json()
+            self.assertEqual(response['analysis']['recommendation'], ['원자료를 확인하세요.'])
+        sent = service.responses.create.call_args.kwargs['input']
+        self.assertNotIn('000000001', sent)   # customer numbers never leave the application
+        sent = json.loads(sent)
+        self.assertEqual((len(sent['history']), sent['역'], sent['호선']), (28, '동부역', '2'))
+        self.assertEqual(sent['history'][-1] | {'요일': None}, {'날짜': '2026-08-31', '요일': None, '사용량_톤': 20, '예측_톤': 10.0, '심각도': '경고', '승하차_명': None})
+
+    def test_analysis_context_gives_usual_levels_for_the_same_weekday(self):
+        from datetime import date as Date, timedelta
+        days = [Date(2026, 7, 1) + timedelta(days=n) for n in range(62)]   # 2026-07-01 ~ 08-31
+        usage = [{'date': d.isoformat(), 'value': 30 if d.weekday() == 5 else 10} for d in days if d != Date(2026, 8, 20)]
+        riders = [{'date': d.isoformat(), 'value': 900 if d.weekday() == 5 else 300} for d in days]
+        daily = {'000000001': {'usage': usage, 'ridership': riders}}
+        risk = {'000000001': [{'date': '2026-08-29', 'actual': 30, 'pred': 12.34, 'residual': 17.66, 'z': 3, 'severity': '주의'},
+                              {'date': '2026-08-27', 'actual': -5, 'pred': 10, 'residual': -15, 'z': 0, 'severity': '경고', 'err': True}]}
+        with patch('back.api.catalog.data_sources', return_value=(daily, risk)):
+            context = data_access.analysis_context('000000001', '2026-08-29')   # 토요일
+        self.assertEqual(context['baseline'], {'같은_요일_지난_8주_사용량_중앙값': 30, '지난_28일_사용량_중앙값': 10,
+                                               '같은_요일_지난_8주_승하차_중앙값': 900, '당일_승하차_명': 900})
+        last = context['history'][-1]
+        self.assertEqual((last['요일'], last['예측_톤'], last['심각도']), ('토', 12.3, '주의'))
+        self.assertIsNone(next(r for r in context['history'] if r['날짜'] == '2026-08-20')['사용량_톤'])   # 빠진 날은 자료 없음
+        invalid = next(r for r in context['history'] if r['날짜'] == '2026-08-27')   # 음수 검침은 사용량으로 넘기지 않는다
+        self.assertEqual((invalid['사용량_톤'], invalid['심각도']), (None, '자료 확인'))
 
     def test_collection_fields_are_validated_and_existing_metadata_is_preserved(self):
         self.login()

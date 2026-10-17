@@ -83,13 +83,19 @@ function CauseResult({ cause }) {
   if (cause.error) return <p className="form-error">분석하지 못했습니다. {cause.error}</p>;
   const a = cause.data || {};
   if (a.error) return <p className="form-error">{a.error}</p>;
+  const steps = Array.isArray(a.recommendation) ? a.recommendation : a.recommendation ? [a.recommendation] : [];
   return (
     <div className="ag-cause">
       <p><strong>{a.primary_cause}</strong>{a.confidence ? ` (확신도 ${a.confidence})` : ""}</p>
-      {a.reasons?.length ? <ul>{a.reasons.map((r, i) => <li key={i}>{r}</li>)}</ul> : null}
+      {a.reasons?.length ? (
+        <>
+          <p className="ag-cause-label">근거</p>
+          <ul>{a.reasons.map((r, i) => <li key={i}>{r}</li>)}</ul>
+        </>
+      ) : null}
       {a.events?.length ? (
         <>
-          <p>관련 정보</p>
+          <p className="ag-cause-label">관련 정보</p>
           <ul>
             {a.events.map((e, i) => {
               const url = extractUrl(e.source);
@@ -103,7 +109,12 @@ function CauseResult({ cause }) {
           </ul>
         </>
       ) : null}
-      {a.recommendation ? <p>권장 조치: {a.recommendation}</p> : null}
+      {steps.length ? (
+        <>
+          <p className="ag-cause-label">현장에서 먼저 확인할 것</p>
+          <ol>{steps.map((s, i) => <li key={i}>{s}</li>)}</ol>
+        </>
+      ) : null}
       <p className="form-hint">AI가 추정한 내용입니다. 실제 원인은 현장에서 확인하세요.</p>
     </div>
   );
