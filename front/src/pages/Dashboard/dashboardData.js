@@ -9,7 +9,7 @@ export const riskMeta = {
   all: { label: "전체", tone: "all" }, alert: { label: "경고", tone: "alert" },
   warn: { label: "주의", tone: "warn" }, ok: { label: "정상", tone: "ok" },
   unknown: { label: "자료 확인", tone: "unknown" },
-  analysis_pending: { label: "분석 대기", tone: "unknown" },
+  analysis_pending: { label: "분석 대기", tone: "waiting" },
   pending: { label: "첫 수집 대기", tone: "pending" },
   billing_only: { label: "청구 전용", tone: "billing" },
 };

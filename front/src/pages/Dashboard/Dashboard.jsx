@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { buildDashboard, defaultSort, sortStations } from "./dashboardData.js";
+import { buildDashboard, defaultSort, riskMeta, sortStations } from "./dashboardData.js";
 import MapPanel from "./components/MapPanel.jsx";
 import PageHeader from "./components/PageHeader.jsx";
 import StationRow from "./components/StationRow.jsx";
@@ -45,6 +45,13 @@ export default function Dashboard({ data, collection }) {
   const lines = [...new Set(allViewStations.flatMap((s) => s.lines).filter(Boolean))].sort((a, b) => Number(a) - Number(b));
   const riskCounts = viewStations.reduce((counts, station) => ({ ...counts, [station.risk]: (counts[station.risk] || 0) + 1 }), { all: viewStations.length });
   const filters = { searchTerm, selectedLine, selectedOffice, selectedRisk };
+  // 노선도 위에 보여 줄 현재 조건. 어디서 바꿨든(표 머리글·범례·검색) 같은 상태를 읽는다.
+  const conditions = [
+    term && `검색 "${searchTerm.trim()}"`,
+    selectedLine !== "all" && `${selectedLine}호선`,
+    selectedOffice !== "all" && (offices.find((o) => String(o.id) === selectedOffice)?.name || selectedOffice),
+    !billingOnly && selectedRisk !== "all" && (riskMeta[selectedRisk]?.label || selectedRisk),
+  ].filter(Boolean);
   const setters = { searchTerm: setSearchTerm, selectedLine: setSelectedLine, selectedOffice: setSelectedOffice, selectedRisk: setSelectedRisk };
   return <main className="app-shell">
     <PageHeader daily={monitored.length} alerts={monitored.filter((s) => s.risk === "alert").length} warnings={monitored.filter((s) => s.risk === "warn").length} />
@@ -54,14 +61,17 @@ export default function Dashboard({ data, collection }) {
       <button type="button" aria-pressed={billingOnly} onClick={() => switchView("billing")} title="청구서만 수집하는 계량기">청구 전용 <span>{billingStations.length}</span></button>
     </div>
     <section className="workspace">
-      <MapPanel stationMap={new Map(filteredStations.map((s) => [s.id, s]))} locations={data.locations || {}} billingOnly={billingOnly}>
+      <MapPanel stationMap={new Map(filteredStations.map((s) => [s.id, s]))} locations={data.locations || {}} billingOnly={billingOnly}
+        selectedRisk={selectedRisk} onSelectRisk={setSelectedRisk} riskCounts={riskCounts} conditions={conditions} onReset={resetFilters}>
         {!billingOnly && <section className="side-block" aria-label="우선 확인할 계량기">
           <SectionTitle as="h2">우선 확인 대상 <span className="count">{alerts.length + warnings.length}개</span></SectionTitle>
           <div className="priority-list">
             {[...alerts, ...warnings].map((station) => <StationRow station={station} key={station.id} />)}
             {!alerts.length && !warnings.length && <EmptyNote>경고·주의 계량기가 없습니다.</EmptyNote>}
           </div>
-          {unknowns.length > 0 && <button type="button" className="text-button" onClick={() => setSelectedRisk("unknown")}>자료 확인이 필요한 계량기 {unknowns.length}개 보기</button>}
+          {selectedRisk === "unknown"
+            ? <button type="button" className="text-button" onClick={() => setSelectedRisk("all")}>자료 확인 계량기 {unknowns.length}개만 보는 중 · 전체 위험도 보기</button>
+            : unknowns.length > 0 && <button type="button" className="text-button" onClick={() => setSelectedRisk("unknown")}>자료 확인이 필요한 계량기 {unknowns.length}개 보기</button>}
         </section>}
       </MapPanel>
     </section>

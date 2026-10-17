@@ -1,4 +1,6 @@
 import { useRef, useState } from "react";
+
+const LABEL_LIMIT = 12;   // 이 개수 이하로 걸러지면 노선도에 역명을 함께 그린다
 import { buildMapGroups, riskMeta } from "../dashboardData.js";
 import { detailHref, ton, won } from "../../Detail/data.js";
 import { EmptyNote, SectionTitle } from "../../Detail/ui.jsx";
@@ -31,7 +33,9 @@ function StationSelection({ station, billingOnly, onClose }) {
 }
 
 // children: 오른쪽 칸에서 고른 역 위에 놓을 내용(일일 관제의 우선 확인 대상).
-export default function MapPanel({ stationMap, locations, billingOnly = false, children }) {
+// selectedRisk·onSelectRisk·riskCounts: 범례를 위험도 선택 버튼으로 쓴다(표 머리글의 위험도 조건과 같은 상태).
+// conditions·onReset: 조건이 걸려 있을 때 노선도 위에 보여 주는 현재 조건 요약과 초기화.
+export default function MapPanel({ stationMap, locations, billingOnly = false, children, selectedRisk = "all", onSelectRisk, riskCounts = {}, conditions = [], onReset }) {
   const [zoom, setZoom] = useState(1);
   const [selected, setSelected] = useState(null);
   const [dragging, setDragging] = useState(false);
@@ -39,6 +43,11 @@ export default function MapPanel({ stationMap, locations, billingOnly = false, c
   const drag = useRef(null);
   const groups = buildMapGroups([...stationMap.values()], locations);
   const mapped = groups.filter((s) => s.position);
+  // 조건으로 걸러져 노드가 적을 때는 역명을 함께 그린다. 12개까지는 노선도 폭에서 라벨이 서로 거의 겹치지 않는다.
+  const labelled = mapped.length > 0 && mapped.length <= LABEL_LIMIT;
+  const points = mapped.map((station) => ({ id: station.id, x: station.position.x * 25.51, y: station.position.y * 21.23 }));
+  // 기본은 노드 오른쇽. 오른쪽 가까이 다른 라벨 노드가 있으면 위쪽에 둔다.
+  const labelSide = (point) => points.some((other) => other.id !== point.id && other.x > point.x - 40 && other.x - point.x < 320 && Math.abs(other.y - point.y) < 60) ? "above" : "right";
   const unplaced = groups.filter((s) => !s.position);
   const active = groups.find((s) => s.id === selected);
   // 끌어서 옮기기는 확대해서 스크롤할 내용이 있을 때만 뜻이 있다. 100%에서는 끌 수 없으므로 손 모양 커서도 보이지 않는다.
@@ -63,6 +72,8 @@ export default function MapPanel({ stationMap, locations, billingOnly = false, c
       <button type="button" onClick={() => setZoom((v) => Math.min(4, v + .5))} disabled={zoom >= 4} aria-label="노선도 확대">+</button>
       <button type="button" onClick={fit}>전체 보기</button>
     </div>}>노선도</SectionTitle>
+    {conditions.length > 0 && <p className="map-conditions" aria-live="polite">현재 조건: {conditions.map((item, i) => <strong key={i}>{item}</strong>)}
+      {onReset && <button type="button" className="text-button" onClick={onReset}>조건 초기화</button>}</p>}
     <div ref={viewport} className={`metro-viewport ${draggable ? "is-draggable" : ""} ${dragging ? "is-dragging" : ""}`} tabIndex={0}
       aria-label={draggable ? "노선도. 스크롤하거나 끌어서 옮길 수 있습니다." : "노선도. 확대하면 스크롤하거나 끌어서 옮길 수 있습니다."}
       onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}>
@@ -70,18 +81,25 @@ export default function MapPanel({ stationMap, locations, billingOnly = false, c
         <image href="/metro_map_rectangle.png" width="2551" height="2123" aria-hidden="true" />
         {mapped.map((station) => {
           const x = station.position.x * 25.51, y = station.position.y * 21.23;
+          const side = labelled ? labelSide({ id: station.id, x, y }) : null;
           const label = `${station.name}, 계량기 ${station.meters.length}개, ${riskMeta[station.risk].label}`;
           return <g key={station.id} transform={`translate(${x} ${y})`} className={`metro-node metro-node--${station.risk}`} data-station={station.id} role="button" tabIndex={0} aria-label={label} aria-pressed={selected === station.id} onClick={() => setSelected(station.id)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelected(station.id); } }}>
             <title>{label}</title><circle className="metro-node-hit" r="33" /><circle className="metro-node-dot" r="18" />
-            <text y="7" textAnchor="middle" className="metro-node-symbol">{station.risk === "billing_only" ? "청" : ["pending", "analysis_pending"].includes(station.risk) ? "·" : station.risk === "unknown" ? "?" : station.risk === "alert" ? "!" : station.meters.length > 1 ? station.meters.length : ""}</text>
+            {labelled && <text className="metro-node-name" x={side === "above" ? 0 : 28} y={side === "above" ? -26 : 9} textAnchor={side === "above" ? "middle" : "start"}>{station.name}</text>}
+            <text y="7" textAnchor="middle" className="metro-node-symbol">{station.risk === "billing_only" ? "청" : station.risk === "alert" ? "!" : ["unknown", "analysis_pending", "pending"].includes(station.risk) ? "" : station.meters.length > 1 ? station.meters.length : ""}</text>
           </g>;
         })}
       </svg>
     </div>
-    <div className="map-legend">
-      {(billingOnly ? ["billing_only"] : ["alert", "warn", "ok", "unknown", "analysis_pending", "pending"]).map((risk) => <RiskBadge key={risk} risk={risk} />)}
-      <span>{billingOnly ? "역을 누르면 그 역의 계량기와 최근 청구 내역을 볼 수 있습니다." : "역을 누르면 그 역의 계량기를 볼 수 있습니다."}</span>
+    <div className="map-legend" role={billingOnly ? undefined : "group"} aria-label={billingOnly ? undefined : "위험도 선택"}>
+      {billingOnly ? <RiskBadge risk="billing_only" />
+        : ["alert", "warn", "ok", "unknown", "analysis_pending", "pending"].map((risk) => (
+          <button key={risk} type="button" className="map-legend-button" aria-pressed={selectedRisk === risk} title={selectedRisk === risk ? "누르면 전체 보기" : `${riskMeta[risk].label}만 보기`}
+            onClick={() => onSelectRisk?.(selectedRisk === risk ? "all" : risk)}>
+            <RiskBadge risk={risk} /><span className="count">{riskCounts[risk] || 0}</span>
+          </button>))}
     </div>
+    <p className="map-legend-help">{billingOnly ? "역을 누르면 그 역의 계량기와 최근 청구 내역을 볼 수 있습니다." : "범례를 누르면 그 위험도만 보입니다. 역을 누르면 그 역의 계량기를 볼 수 있습니다."}</p>
     {unplaced.length > 0 && <details className="map-unplaced"><summary>노선도에 위치가 없는 역 {unplaced.length}개</summary><ul>{unplaced.map((station) => <li key={station.id}><button type="button" className="text-button" onClick={() => setSelected(station.id)}>{station.name} ({station.meters.length}개)</button></li>)}</ul></details>}
     <p className="map-source">노선도 출처: 서울교통공사</p>
   </section>

@@ -135,7 +135,12 @@ small { font-size: 12px; }
 .risk-badge.risk-alert { color: var(--alert); }
 .risk-badge.risk-warn { color: var(--warn); }
 .risk-badge.risk-ok { color: var(--ok); }
-.risk-badge.risk-pending::before, .risk-badge.risk-billing::before { background: none; box-shadow: inset 0 0 0 2px currentColor; }
+/* 판정이 없는 세 상태는 서로 다른 모양: 자료 확인 = 짙은 바탕에 노란 점선 테두리, 분석 대기 = 빈 원(실선), 첫 수집 대기 = 빈 원(점선) */
+/* 판정이 없는 세 상태도 경고·주의·정상처럼 진한 단색 점으로: 자료 확인 = 진보라, 분석 대기 = 진파랑, 첫 수집 대기 = 자홍 */
+.risk-badge.risk-unknown { color: #6a1b9a; }
+.risk-badge.risk-waiting { color: #2962ff; }
+.risk-badge.risk-pending { color: #c2185b; }
+.risk-badge.risk-billing::before { background: none; box-shadow: inset 0 0 0 2px currentColor; }
 .line-badges { display: inline-flex; gap: 4px; }
 .line-badge { display: inline-grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 50%; background: var(--line-color); color: #fff; font-size: 12px; font-weight: 700; line-height: 1; }
 button.line-badge { width: 28px; height: 28px; font-size: 14px; }
@@ -237,12 +242,27 @@ th.is-sorted .th-sort, th.is-sorted .th-sort-mark { color: var(--brand); }
 .metro-node--alert .metro-node-dot { fill: #c62828; }
 .metro-node--warn .metro-node-dot { fill: #d48806; }
 .metro-node--ok .metro-node-dot { fill: #2e8b66; }
-.metro-node--unknown .metro-node-dot { stroke-dasharray: 8 4; }
+/* 판정 없는 상태도 같은 모양의 단색 점. 색만 다르다 */
+.metro-node--unknown .metro-node-dot { fill: #6a1b9a; }
+.metro-node--analysis_pending .metro-node-dot { fill: #2962ff; }
+.metro-node--pending .metro-node-dot { fill: #c2185b; }
 .metro-node:hover .metro-node-hit, .metro-node:focus-visible .metro-node-hit, .metro-node[aria-pressed="true"] .metro-node-hit { fill: rgba(23, 40, 139, .13); stroke: #17288b; stroke-width: 3; }
 .metro-node-symbol { fill: #fff; font-size: 23px; font-weight: 700; pointer-events: none; }
-.map-legend { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 14px; margin-top: 10px; }
+/* 걸러진 역이 적을 때 노드 옆에 그리는 역명. 흰 테두리를 글자 뒤에 깔아 노선 위에서도 읽힌다 */
+.metro-node-name { fill: #1b1f27; font-size: 26px; font-weight: 700; paint-order: stroke fill; stroke: #fff; stroke-width: 7px; stroke-linejoin: round; pointer-events: none; }
+.metro-node[aria-pressed="true"] .metro-node-name, .metro-node:hover .metro-node-name { fill: #17288b; }
+.map-legend { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; margin-top: 10px; }
+.map-legend-help { margin: 6px 0 0; color: var(--mute); font-size: 12px; }
 .map-legend .risk-badge { font-size: 12px; font-weight: 400; }
-.map-legend > span:last-child { margin-left: auto; color: var(--mute); font-size: 12px; }
+/* 범례 배지가 곧 위험도 선택 버튼: 누르면 그 위험도만, 다시 누르면 전체. 표 머리글의 위험도 조건과 같은 상태를 쓴다 */
+.map-legend-button { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border: 1px solid transparent; border-radius: 14px; background: none; font: inherit; }
+.map-legend-button span.count { color: var(--mute); font-size: 12px; font-variant-numeric: tabular-nums; }
+.map-legend-button:hover { border-color: var(--rule); background: var(--ground); }
+.map-legend-button[aria-pressed="true"] { border-color: var(--ink); background: var(--ink); }
+.map-legend-button[aria-pressed="true"] .risk-badge, .map-legend-button[aria-pressed="true"] span.count { color: #fff; }
+.map-conditions { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; margin: -4px 0 10px; color: var(--sub); font-size: 13px; }
+.map-conditions strong { color: var(--ink); font-weight: 600; }
+.map-conditions .text-button { margin-left: auto; }
 .map-unplaced { margin-top: 12px; color: var(--sub); font-size: 13px; }
 .map-unplaced summary { width: fit-content; color: var(--brand); cursor: pointer; }
 .map-unplaced ul { display: flex; flex-wrap: wrap; gap: 4px 16px; max-height: 170px; margin: 8px 0 0; padding: 0; overflow-y: auto; list-style: none; }
@@ -285,7 +305,7 @@ th.is-sorted .th-sort, th.is-sorted .th-sort-mark { color: var(--brand); }
   .table-search { max-width: none; flex-basis: 100%; }
   .table-toolbar > .text-button { margin-left: 0; }
   .form-grid { grid-template-columns: 1fr; }
-  .map-legend > span:last-child { margin-left: 0; }
+  .map-conditions .text-button { margin-left: 0; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
