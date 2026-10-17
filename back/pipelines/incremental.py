@@ -153,6 +153,7 @@ def _collect(meter, session, notify, include_bills=True):
         months = []
     else:
         months = water_months(observations, end, checked) if daily_enabled else []
+    gaps = []   # days the source itself left without a usable value
     for month in months:
         notify(f"{month} 일일 사용량을 조회하는 중입니다.")
         try:
@@ -167,10 +168,8 @@ def _collect(meter, session, notify, include_bills=True):
                     raise ValueError("Invalid customer or usage")
                 merge_csv(runtime / "daily" / "water" / f"{observed}.csv", [row], FIELDS, ["고객번호", "사용일"])
                 fresh[str(observed)] = value
-            new_issues = [day for day in issues if day not in known_issues]
+            gaps += [day for day in issues if day not in known_issues]
             known_issues.update(issues)
-            if new_issues:   # the source has no usable value: a notice, not a failed collection
-                notes.append(f"{', '.join(new_issues)} 아리수 검침값 누락·오류로 해당 관측을 제외했습니다")
             checked[month] = str(today())
         except CustomerAccessError:
             errors.append("일일 사용량: 현재 아리수 계정으로 조회할 수 없습니다. 청구서는 별도로 조회합니다")
@@ -182,6 +181,8 @@ def _collect(meter, session, notify, include_bills=True):
             logger.warning("Water query %s failed (%s)", month, type(exc).__name__)
             errors.append(f"{month} 일일 사용량 조회에 실패했습니다")
             retry = retry or transient(exc)
+    if gaps:   # a notice beside usable readings; with no usable reading at all, the source itself may be broken
+        (notes if fresh else errors).append(f"{', '.join(gaps)} 아리수 검침값 누락·오류로 해당 관측을 제외했습니다")
     bills = []
     bill_end = today().strftime('%Y-%m')
     retries = state.get('bill_retry_windows', [])

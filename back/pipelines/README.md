@@ -6,8 +6,9 @@ Archived files are not runtime inputs. The initial risk dataset is maintained at
 `data/app_seed/risk/test_anomalies.csv`; new model results belong to `APP_DATA_DIR/model`.
 
 All collection uses registered contracts from the application database. Archived and
-inactive contracts are excluded. The API's incremental worker probes both daily readings
-and bills for active Arisu contracts, including newly registered bill-only contracts.
+inactive contracts are excluded. The API's incremental worker probes daily readings of active
+Arisu contracts every day, and their bills (bill-only contracts included) on the Monday run,
+manual updates and registration/restoration checks.
 The explicit range CLI uses `daily_enabled` for daily water/ridership collection.
 Other providers remain visible in the catalog but are not sent to Arisu.
 
@@ -26,8 +27,8 @@ must identify the requested customer before a connection is verified. Errors and
 responses never delete previous values. The same customer cannot be registered twice.
 For a connection test, update an existing meter or use a separate temporary database.
 
-Incremental collection fills missing dates, rechecks the recent three months and recent
-bill months, and probes the past twelve months for a new customer. Older empty water
+Incremental collection fills missing dates, rechecks the recent three months and, when it
+includes bills, the recent bill months, and probes the past twelve months for a new customer. Older empty water
 months are retried weekly. New observations publish a snapshot; risk evaluation keeps
 its prior date until a model refresh. The Arisu update does not call the ridership API
 or train the model. Use the explicit CLI below for those operations.
@@ -38,7 +39,7 @@ use customer number and the exact registered name, independently of member regis
 A daily access failure does not prevent bill collection. Historical JSON readings and the latest unbilled
 JSON readings are merged by observation date, through the last completed day.
 A day the source itself leaves missing or invalid is excluded, reported once as a notice
-rather than a failed collection, and remembered. Identical readings repeated in different
+rather than a failed collection (a failure when no reading was usable at all), and remembered. Identical readings repeated in different
 billing periods are kept once; conflicting
 observations and mismatched customer responses fail validation. Levy pages are
 paginated, and invalid cached customer/date records are fetched again.

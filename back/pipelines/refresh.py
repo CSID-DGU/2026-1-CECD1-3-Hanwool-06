@@ -205,7 +205,9 @@ def build_model_bills(meters, runtime):
         return
     raw = pd.read_csv(path, encoding="utf-8-sig", dtype={"mkey": str, "notice_number": str}, keep_default_na=False)
     raw = raw[raw["gubun"] == "정기분"].rename(columns={"mkey": "고객번호", "napgi": "납기일", "total_usage_ton": "총사용량_톤", "bugwa_amount_won": "부과금액_원"})
-    metadata = {customer_number(m["customer_number"]): m for m in meters}
+    raw = raw[pd.to_numeric(raw["총사용량_톤"], errors="coerce").notna()]   # an incomplete row never replaces a stored bill
+    # Only Arisu contracts have Arisu bills; other providers' contract numbers are free text.
+    metadata = {customer_number(m["customer_number"]): m for m in meters if m.get("provider", "arisu") == "arisu"}
     raw["고객번호"] = raw["고객번호"].map(customer_number)
     raw = raw[raw["고객번호"].isin(metadata)]
     for target, field in [("역명", "station_name"), ("영업사업소", "office_name"), ("용도", "purpose")]:

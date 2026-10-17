@@ -303,6 +303,17 @@ class IncrementalTest(unittest.TestCase):
             inc.collect_meter(self.meter)
         self.assertEqual(json.loads((config.DATA_DIR / 'collection/000000001.json').read_text())['water_excluded'], [])
 
+    def test_source_gaps_without_any_usable_reading_are_a_failure(self):
+        def broken(_session, _meter, month, *, issues, **kwargs):
+            if month == '2026-06':
+                issues.append('2026-06-04')
+            return []
+        with patch.object(inc, 'fetch_month', side_effect=broken), patch.object(inc, 'collect_bills', return_value={'rows': [], 'errors': []}):
+            result = inc.collect_meter(self.meter, include_bills=False)
+        # with no usable reading at all the source itself may be broken: a failure that is mailed, not a notice
+        self.assertEqual((result['status'], result['retryable']), ('failed', False))
+        self.assertIn('2026-06-04 아리수 검침값 누락', result['message'])
+
     def test_run_without_bill_check_collects_daily_usage_and_keeps_pending_bill_windows(self):
         state = config.DATA_DIR / 'collection/000000001.json'
         with patch.object(inc, 'fetch_month', return_value=[self.row()]), patch.object(inc, 'collect_bills',
@@ -322,7 +333,9 @@ class IncrementalTest(unittest.TestCase):
         path.parent.mkdir(parents=True)
         rows = [{'mkey': '000000001', 'napgi': '2026-08-31', 'gubun': '정기분', 'notice_number': '', 'total_usage_ton': 60, 'bugwa_amount_won': 900},
                 {'mkey': '000000001', 'napgi': '2026-09-15', 'gubun': '수시분', 'notice_number': '090000001', 'total_usage_ton': 5, 'bugwa_amount_won': 50},
-                {'mkey': '000000002', 'napgi': '2026-08-31', 'gubun': '정기분', 'notice_number': '', 'total_usage_ton': 70, 'bugwa_amount_won': 990}]
+                {'mkey': '000000002', 'napgi': '2026-08-31', 'gubun': '정기분', 'notice_number': '', 'total_usage_ton': 70, 'bugwa_amount_won': 990},
+                # a collected row whose detail failed carries no usage and must not replace the stored bill
+                {'mkey': '000000001', 'napgi': '2026-06-30', 'gubun': '정기분', 'notice_number': '', 'total_usage_ton': '', 'bugwa_amount_won': ''}]
         with path.open('w', encoding='utf-8-sig', newline='') as stream:
             writer = csv.DictWriter(stream, fieldnames=list(rows[0]))
             writer.writeheader()
@@ -330,8 +343,9 @@ class IncrementalTest(unittest.TestCase):
         import pandas as pd
         old = pd.DataFrame([{'고객번호': '000000001', '역명': '가역', '영업사업소': '사업소', '용도': '', '납기일': '2026-06-30',
                              '총사용량_톤': 40, '부과금액_원': 600}])
+        other = {'id': 'other', 'customer_number': 'GM-2026-0001', 'provider': 'other', 'station_name': '기타역'}
         with patch.object(refresh, '_read_csv', return_value=old):
-            refresh.build_model_bills([self.meter], config.DATA_DIR)
+            refresh.build_model_bills([self.meter, other], config.DATA_DIR)   # another provider's free-text number is skipped
         built = pd.read_csv(config.DATA_DIR / 'processed/water_bills.csv', encoding='utf-8-sig', dtype={'고객번호': str})
         # the stored bill and the newly collected one; supplementary notices and unregistered customers stay out
         self.assertEqual(built[['고객번호', '종료연월', '격월사용량_톤']].values.tolist(),
