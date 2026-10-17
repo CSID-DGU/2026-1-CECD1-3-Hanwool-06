@@ -195,7 +195,7 @@ class SyncTest(unittest.TestCase):
         self.data = self.root / 'runtime'
         files = {'app.sqlite3': b'sqlite', 'app.sqlite3-wal': b'wal', '.collection.lock': b'', '.collection-worker.lock': b'',
                  'collection/000000001.json': b'{"water_checked": {}}', 'daily/water/2026-06-01.csv': b'a,b\n1,2\n',
-                 'daily/water/2026-06-01.status.json': b'{}', 'snapshot/manifest.json': b'{"published": true}',
+                 'daily/water/2026-06-01.status.json': b'{}', 'snapshot/manifest.json': b'{"directory": "versions/abc"}',
                  'snapshot/versions/abc/daily.json': b'{}', 'snapshot/versions/abc/risk.json': b'{}', 'model/model.txt': b'tree',
                  'refresh_report.json': b'{}', 'daily/water/.2026-06-02.csv.tmp123': b'half'}
         for relative, content in files.items():
@@ -263,9 +263,95 @@ class SyncTest(unittest.TestCase):
         self.assertEqual(retry['summary']['uploaded'], 1)   # 실패한 파일만 다음에 올라간다
         self.assertEqual(retry['failed'], [])
 
+    def test_only_the_snapshot_version_the_screen_reads_is_kept_in_the_bucket(self):
+        old = self.data / 'snapshot/versions/old'
+        old.mkdir()
+        (old / 'daily.json').write_bytes(b'{"old": 1}')
+        self.fake.objects['mulsaemi/snapshot/versions/old/daily.json'] = {   # 고치기 전 동기화가 올려 둔 지난 버전
+            'Body': b'{"old": 1}', 'Metadata': {}, 'LastModified': datetime.now(timezone.utc)}
+        report = sync_data_dir(self.data, self.storage)
+        self.assertIn('snapshot/versions/abc/daily.json', {u['relative'] for u in report['uploaded']})
+        self.assertIn(('snapshot/versions/old/daily.json', 'old_snapshot'), {(e['relative'], e['category']) for e in report['excluded']})
+        self.assertEqual(report['pruned'], ['mulsaemi/snapshot/versions/old/daily.json'])
+        self.assertNotIn('snapshot/versions/old/daily.json', verify_data_dir(self.data, self.storage)['missing_remote'])
+
+        def versions():
+            return sorted(k for k in self.fake.objects if '/snapshot/versions/' in k)
+        # 화면이 새 버전으로 바뀌면 새 버전을 올리고 버킷의 이전 버전은 지운다
+        new = self.data / 'snapshot/versions/new'
+        new.mkdir()
+        (new / 'daily.json').write_bytes(b'{"new": 1}')
+        (self.data / 'snapshot/manifest.json').write_bytes(b'{"directory": "versions/new"}')
+        start = len(self.fake.calls)
+        sync_data_dir(self.data, self.storage)
+        self.assertEqual(versions(), ['mulsaemi/snapshot/versions/new/daily.json'])
+        uploads = [key for call, key in self.fake.calls[start:] if call == 'upload_fileobj' and '/snapshot/' in key]
+        self.assertEqual(uploads[-1], 'mulsaemi/snapshot/manifest.json')   # manifest 는 그 버전을 다 올린 뒤에
+        # 새 버전을 올리다 실패하면 버킷의 지금 버전은 지우지 않는다
+        newer = self.data / 'snapshot/versions/newer'
+        newer.mkdir()
+        (newer / 'daily.json').write_bytes(b'{"newer": 1}')
+        (self.data / 'snapshot/manifest.json').write_bytes(b'{"directory": "versions/newer"}')
+        put_file = self.storage.put_file
+
+        def failing(path, key, **kwargs):
+            if '/versions/newer/' in key:
+                raise StorageError('AccessDenied')
+            return put_file(path, key, **kwargs)
+        with patch.object(self.storage, 'put_file', side_effect=failing):
+            failed = sync_data_dir(self.data, self.storage)
+        self.assertEqual(failed['pruned'], [])
+        self.assertEqual(versions(), ['mulsaemi/snapshot/versions/new/daily.json'])
+        self.assertIn(b'versions/new', self.fake.objects['mulsaemi/snapshot/manifest.json']['Body'])   # 버킷은 아직 올라간 버전을 가리킨다
+        # 지금 버전을 알 수 없으면(manifest 없음) 버킷에서 아무것도 지우지 않는다
+        (self.data / 'snapshot/manifest.json').unlink()
+        self.assertEqual(sync_data_dir(self.data, self.storage)['pruned'], [])
+        self.assertEqual(versions(), ['mulsaemi/snapshot/versions/new/daily.json'])
+
+    def seed(self, relative, body):
+        self.fake.objects['mulsaemi/' + relative] = {'Body': body, 'Metadata': {'sha256': sha(body)}, 'LastModified': datetime.now(timezone.utc)}
+
+    def test_restored_server_without_the_current_version_keeps_the_last_complete_snapshot(self):
+        # 새 버전(v2)을 올리다 옛 서버가 멈춘 버킷: manifest 는 v2, 버전은 v1 만 있다. 그 버킷에서 복원한 새 서버의 첫 동기화.
+        for relative in ('snapshot/versions/abc/daily.json', 'snapshot/versions/abc/risk.json'):
+            (self.data / relative).unlink()
+        (self.data / 'snapshot/versions/abc').rmdir()
+        v1 = self.data / 'snapshot/versions/v1'
+        v1.mkdir()
+        (v1 / 'daily.json').write_bytes(b'{"v1": 1}')
+        (self.data / 'snapshot/manifest.json').write_bytes(b'{"directory": "versions/v2"}')
+        self.seed('snapshot/manifest.json', b'{"directory": "versions/v2"}')
+        self.seed('snapshot/versions/v1/daily.json', b'{"v1": 1}')
+        report = sync_data_dir(self.data, self.storage)
+        self.assertEqual(report['pruned'], [])
+        self.assertIn('mulsaemi/snapshot/versions/v1/daily.json', self.fake.objects)
+
+    def test_snapshot_switched_during_a_sync_is_left_for_the_next_one(self):
+        old = self.data / 'snapshot/versions/old'
+        old.mkdir()
+        (old / 'daily.json').write_bytes(b'{"old": 1}')
+        self.seed('snapshot/versions/old/daily.json', b'{"old": 1}')
+        from back.storage import sync as sync_module
+        with patch.object(sync_module, 'current_snapshot', side_effect=['versions/abc', 'versions/later']):
+            report = sync_data_dir(self.data, self.storage)
+        self.assertIn({'relative': 'snapshot/manifest.json', 'error': 'SnapshotNotReady'}, report['failed'])
+        self.assertNotIn('mulsaemi/snapshot/manifest.json', self.fake.objects)
+        self.assertEqual(report['pruned'], [])
+        self.assertIn('mulsaemi/snapshot/versions/old/daily.json', self.fake.objects)
+
+    def test_nothing_is_pruned_unless_the_current_version_is_really_in_the_bucket(self):
+        sync_data_dir(self.data, self.storage)
+        self.seed('snapshot/versions/old/daily.json', b'{"old": 1}')
+        del self.fake.objects['mulsaemi/snapshot/versions/abc/risk.json']   # 버킷에서 사라진 지금 버전 파일(색인은 올렸다고 기억)
+        (self.data / 'snapshot/manifest.json').write_bytes(b'{"directory": "versions/abc", "refreshed": 1}')
+        report = sync_data_dir(self.data, self.storage)
+        self.assertEqual(report['pruned'], [])
+        self.assertIn('mulsaemi/snapshot/versions/old/daily.json', self.fake.objects)
+
     def test_dry_run_changes_nothing(self):
         report = sync_data_dir(self.data, self.storage, dry_run=True)
         self.assertEqual(len(report['uploaded']), 8)
+        self.assertNotIn('pruned', report['summary'])   # 시험 실행은 무엇을 지울지 계산하지 않는다
         self.assertTrue(all(u.get('planned') for u in report['uploaded']))
         self.assertEqual(self.fake.objects, {})
         self.assertFalse((self.data / layout.INDEX_FILE).exists())

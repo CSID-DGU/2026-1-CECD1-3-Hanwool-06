@@ -43,7 +43,8 @@ NCP Object Storage(S3 호환 API)에 `APP_DATA_DIR`의 장기 보관 파일을 �
 | 모델 입력 | `dataset/` | ✓ | train/valid 분할 경계가 여기 남음 |
 | 가공 자료 | `processed/` | ✓ | |
 | 모델 결과 | `model/` | ✓ | `model.txt`, `test_anomalies.csv`, `metrics.json` 등 |
-| 스냅샷 | `snapshot/manifest.json`, `snapshot/versions/<id>/` | ✓ | 화면이 읽는 daily.json·risk.json |
+| 스냅샷 | `snapshot/manifest.json`, manifest가 가리키는 `snapshot/versions/<id>/` | ✓ | 화면이 읽는 daily.json·risk.json |
+| 지난 스냅샷 버전 | 그 밖의 `snapshot/versions/<id>/` | ✗ | 자료가 바뀔 때마다 전체를 다시 묶은 사본(버전마다 약 31MB, 서버에서는 하루 뒤 지워짐). 스냅샷이 바뀐 동기화에서, 지금 버전이 버킷에 그대로 있는지(크기·sha256) 확인한 뒤 버킷의 지난 버전도 지운다. `manifest.json`은 그 버전을 다 올린 뒤 마지막에 올린다 |
 | 실행 보고서 | `refresh_report.json` | ✓ | |
 
 로컬 색인 `.object-storage-index.json`(상대 경로 → sha256·크기·mtime)으로 바뀐 파일만 골라 올립니다. 색인이 없어도(새 서버) 원격 해시가 같으면 다시 올리지 않습니다.

@@ -127,7 +127,7 @@ python -m back.storage selftest    # 임시 자료·임시 DB·접두어 mulsaem
 - **동일 DB에 여러 서버**: 한 설치에 하나의 `APP_DATA_DIR`·DB만 쓰세요. 서버를 나누면 `OBJECT_STORAGE_PREFIX`를 다르게 둡니다.
 - **GitHub Actions self-hosted 워크플로(`.github/workflows/daily.yml`)**: 수동 실행 전용이며 수정하지 않았습니다. 그 러너에 스토리지 변수가 없으면(기본 꺼짐) 복사만 건너뜁니다.
 - **키 교체**: Object Storage 인증키를 바꾸면 환경변수만 교체하고 API를 재시작합니다.
-- **삭제**: 버킷에서 코드가 지우는 것은 `backups/sqlite/`의 오래된 백업(기본 30개 초과분)과 `selftest` 자신의 임시 접두어뿐입니다. 그 밖의 객체와 로컬 파일 삭제는 사람이 승인 후 수행합니다.
+- **삭제**: 버킷에서 코드가 지우는 것은 `backups/sqlite/`의 오래된 백업(기본 30개 초과분), 지난 스냅샷 버전(`snapshot/versions/` 중 화면이 지금 읽는 버전이 아닌 것. 지금 버전이 버킷에 그대로 있는지 크기·sha256으로 확인한 뒤에만 지움), `selftest` 자신의 임시 접두어뿐입니다. 그 밖의 객체와 로컬 파일 삭제는 사람이 승인 후 수행합니다.
 - **운영 중 `.env`**: 운영 모드는 `.env`를 읽지 않습니다. 개발 PC에서만 사용합니다.
 
 ## 9. 별도 배포 예정 (이번 커밋 미포함)

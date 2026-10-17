@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -35,11 +36,13 @@ DATASET = Category('dataset', '모델 입력 자료(dataset)', True, 'train/vali
 PROCESSED = Category('processed', '가공 자료(processed)', True, '청구 기준값 등 모델 갱신 결과')
 MODEL = Category('model', '모델 결과(model)', True, '위험도 판정 결과와 학습한 모델 파일')
 SNAPSHOT = Category('snapshot', '공개 스냅샷(snapshot)', True, '화면이 읽는 daily.json·risk.json 과 manifest')
+OLD_SNAPSHOT = Category('old_snapshot', '지난 스냅샷 버전(snapshot/versions)', False,
+                        '자료가 바뀔 때마다 전체를 다시 묶은 사본이라, 화면이 지금 읽는 버전 하나만 보관한다')
 REPORT = Category('report', '실행 보고서', True, 'refresh_report.json 등 실행 기록')
 OTHER = Category('other', '그 밖의 파일', True, '분류되지 않은 파일도 누락 없이 복사한다')
 
 CATEGORIES = [DATABASE, LOCK, TEMP, INDEX, COLLECTION_STATE, DAILY_WATER, DAILY_RIDERSHIP, RAW_BILLS, RAW_BILL_CACHE,
-              RAW_RIDERSHIP_MONTHLY, DATASET, PROCESSED, MODEL, SNAPSHOT, REPORT, OTHER]
+              RAW_RIDERSHIP_MONTHLY, DATASET, PROCESSED, MODEL, SNAPSHOT, OLD_SNAPSHOT, REPORT, OTHER]
 
 INDEX_FILE = '.object-storage-index.json'
 LOCK_FILE = '.object-storage.lock'
@@ -128,13 +131,31 @@ def backup_moment(key: str) -> str | None:
     return match.group(1) if match else None
 
 
-def iter_files(data_dir: Path) -> Iterator[tuple[Path, PurePosixPath, Category]]:
-    """`data_dir` 아래 모든 일반 파일을 (절대 경로, 상대 경로, 분류)로 돌려준다. 심볼릭 링크는 따라가지 않는다."""
+def current_snapshot(data_dir: Path) -> str | None:
+    """화면이 지금 읽는 스냅샷 버전 폴더(`snapshot/manifest.json`의 directory, 예: `versions/<id>`). 모르면 None."""
+    try:
+        directory = json.loads((Path(data_dir) / 'snapshot' / 'manifest.json').read_text(encoding='utf-8'))['directory']
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    directory = directory.strip('/') if isinstance(directory, str) else ''
+    parts = PurePosixPath(directory).parts
+    return directory if len(parts) == 2 and parts[0] == 'versions' and parts[1] not in ('.', '..') else None
+
+
+def iter_files(data_dir: Path, current: str | None = None) -> Iterator[tuple[Path, PurePosixPath, Category]]:
+    """`data_dir` 아래 모든 일반 파일을 (절대 경로, 상대 경로, 분류)로 돌려준다. 심볼릭 링크는 따라가지 않는다.
+
+    스냅샷 버전 폴더는 `current`(기본: manifest 가 가리키는 버전)만 보관 대상이고 나머지는 지난 버전이다.
+    """
     data_dir = Path(data_dir)
     if not data_dir.is_dir():
         return
+    current = current or current_snapshot(data_dir)
     for path in sorted(p for p in data_dir.rglob('*') if p.is_file() and not p.is_symlink()):
         if any(part == '__pycache__' for part in path.relative_to(data_dir).parts):
             continue
         relative = PurePosixPath(path.relative_to(data_dir).as_posix())
-        yield path, relative, classify(relative)
+        category = classify(relative)
+        if category is SNAPSHOT and relative.parts[1:2] == ('versions',) and '/'.join(relative.parts[1:3]) != current:
+            category = OLD_SNAPSHOT
+        yield path, relative, category

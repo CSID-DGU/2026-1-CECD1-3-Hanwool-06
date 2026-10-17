@@ -19,9 +19,10 @@ from pathlib import Path
 from back.locking import lock_file, unlock_file
 from .client import ObjectStorage, StorageError, sha256_file
 from .layout import (BACKUP_PREFIX, INDEX_FILE, LOCK_FILE, MIGRATION_REPORT_PREFIX, backup_key, backup_moment,
-                     iter_files, object_key, relative_from_key)
+                     current_snapshot, iter_files, object_key, relative_from_key)
 
 logger = logging.getLogger(__name__)
+MANIFEST = 'snapshot/manifest.json'
 
 
 def _now():
@@ -85,11 +86,11 @@ class _SyncLock:
                 self.handle.close()
 
 
-def plan(data_dir: Path, storage: ObjectStorage, index: dict | None = None) -> list[dict]:
+def plan(data_dir: Path, storage: ObjectStorage, index: dict | None = None, current: str | None = None) -> list[dict]:
     """파일마다 할 일을 정한다: upload / unchanged / excluded. 네트워크는 쓰지 않는다."""
     index = load_index(data_dir) if index is None else index
     items = []
-    for path, relative, category in iter_files(data_dir):
+    for path, relative, category in iter_files(data_dir, current):
         try:
             info = path.stat()
         except OSError:
@@ -121,7 +122,13 @@ def sync_data_dir(data_dir: Path, storage: ObjectStorage, *, dry_run=False, veri
             report.update(skipped='another sync is running', finished_at=_now())
             return report
         index = load_index(data_dir)
-        for item in plan(data_dir, storage, index):
+        current = current_snapshot(data_dir)   # 올리기와 지우기가 같은 버전을 기준으로 삼는다
+        # manifest 는 맨 끝에, 그 버전을 다 올린 뒤에만 올린다. 버킷의 manifest 가 없는 버전을 가리키지 않게 한다.
+        for item in sorted(plan(data_dir, storage, index, current), key=lambda item: item['relative'] == MANIFEST):
+            if item['relative'] == MANIFEST and item['action'] == 'upload' and (
+                    current_snapshot(data_dir) != current or any(f['relative'].startswith('snapshot/') for f in report['failed'])):
+                report['failed'].append({'relative': MANIFEST, 'error': 'SnapshotNotReady'})   # 다음 동기화에서 다시 맞춘다
+                continue
             if item['action'] == 'excluded':
                 report['excluded'].append({k: item[k] for k in ('relative', 'category', 'reason')})
                 continue
@@ -158,12 +165,46 @@ def sync_data_dir(data_dir: Path, storage: ObjectStorage, *, dry_run=False, veri
                 logger.warning('Object storage sync of %s failed (%s)', item['relative'], type(exc).__name__)
                 report['failed'].append({'relative': item['relative'], 'error': type(exc).__name__})
         if not dry_run:
+            # 스냅샷이 바뀐 동기화에서만 정리한다(바뀐 것이 없으면 요청을 보내지 않는다).
+            changed = any(u['relative'].startswith('snapshot/') for u in report['uploaded']) \
+                or any(r.startswith('snapshot/') for r in report['verified_remote'])
+            report['pruned'] = _prune_old_snapshots(storage, data_dir, current, report['failed']) if changed else []
             save_index(data_dir, index)
     report['finished_at'] = _now()
     report['summary'] = {'uploaded': len(report['uploaded']), 'unchanged': len(report['unchanged']),
                          'verified_remote': len(report['verified_remote']), 'excluded': len(report['excluded']),
                          'failed': len(report['failed'])}
+    if not dry_run:
+        report['summary']['pruned'] = len(report['pruned'])
     return report
+
+
+def _prune_old_snapshots(storage: ObjectStorage, data_dir: Path, current: str | None, failed: list[dict]) -> list[str]:
+    """버킷의 지난 스냅샷 버전을 지운다.
+
+    지금 버전이 이 서버에 있고, 그 파일마다 버킷 객체의 크기·sha256 이 같다고 확인한 뒤에만 지운다.
+    지금 버전을 모르거나 이번에 스냅샷을 다 올리지 못했으면 아무것도 지우지 않는다.
+    """
+    if not current or any(f['relative'].startswith('snapshot/') for f in failed):
+        return []
+    version_dir = Path(data_dir) / 'snapshot' / current
+    files = sorted(p for p in version_dir.rglob('*') if p.is_file()) if version_dir.is_dir() else []
+    if not files:
+        return []
+    keep = object_key(storage.prefix, f'snapshot/{current}') + '/'
+    pruned = []
+    try:
+        for path in files:
+            remote = storage.head(object_key(storage.prefix, path.relative_to(data_dir).as_posix()))
+            if not remote or remote.get('size') != path.stat().st_size or remote.get('sha256') != sha256_file(path):
+                return []
+        for item in storage.list(object_key(storage.prefix, 'snapshot/versions') + '/'):
+            if not item['key'].startswith(keep):
+                storage.delete(item['key'])
+                pruned.append(item['key'])
+    except (OSError, StorageError) as exc:
+        logger.warning('Old snapshot versions were not pruned (%s)', type(exc).__name__)
+    return pruned
 
 
 def backup_database(db_path: Path, storage: ObjectStorage, *, keep: int = 30, moment: datetime | None = None) -> dict:
