@@ -1,10 +1,10 @@
 import { useLayoutEffect, useRef, useState } from "react";
-import { chartRange } from "./data.js";
+import { chartRange, xLabelStep, xLabelVisible } from "./data.js";
 
 // 의존성 없는 SVG 라인차트.
 // 컨테이너 실제 너비를 측정해 viewBox=픽셀 1:1 로 그림 → 폭이 달라도 글씨 크기·여백이 일정.
 // series: [{ color, values: number[], fill?: bool }] / xLabels: string[]
-// labelEvery: x라벨 간격 / showValues: 각 점 위 값 표기 / yUnit·xUnit: 축 단위
+// labelEvery: x라벨 최소 간격(라벨이 겹칠 만큼 좁으면 자동으로 더 벌린다) / showValues: 각 점 위 값 표기 / yUnit·xUnit: 축 단위
 export default function LineChart({
   series,
   xLabels = [],
@@ -65,7 +65,8 @@ export default function LineChart({
       ? "" // 결측이 있으면 면적 채움 생략(끊긴 구간 음영 방지)
       : `${line(vals)} L${X(n - 1).toFixed(1)},${Y(lo).toFixed(1)} L${X(0).toFixed(1)},${Y(lo).toFixed(1)} Z`;
 
-  const step = labelEvery || Math.max(1, Math.ceil(n / 6));
+  // 라벨은 글자 폭이 점 사이 간격에 들어갈 만큼만 찍고, 마지막 점에서 거꾸로 같은 간격으로 고른다(끝 라벨이 이웃과 붙지 않는다).
+  const step = xLabelStep(xLabels, n <= 1 ? W : (W - padL - padR) / (n - 1), labelEvery);
   const fv = formatValue || formatY;
 
   return (
@@ -80,7 +81,7 @@ export default function LineChart({
           </g>
         ))}
         {xLabels.map((lab, i) =>
-          i % step === 0 || i === n - 1 ? (
+          xLabelVisible(i, n, step) ? (
             <text key={i} x={X(i)} y={H - 24} textAnchor="middle" className="dt-chart-axis">
               {lab}
             </text>

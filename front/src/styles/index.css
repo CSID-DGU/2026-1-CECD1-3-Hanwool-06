@@ -200,11 +200,22 @@ th.is-sorted .th-sort, th.is-sorted .th-sort-mark { color: var(--brand); }
 .dd-mark { flex-shrink: 0; width: 6px; height: 6px; margin: 0 3px 3px 0; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; color: var(--mute); transform: rotate(45deg); }
 .dd-button:hover .dd-mark { color: var(--ink); }
 .dd-button[aria-expanded="true"] .dd-mark { margin: 3px 3px 0 0; transform: rotate(-135deg); }
-.dd-list { position: fixed; z-index: 100; max-height: 370px; min-width: 120px; max-width: min(360px, calc(100vw - 32px)); margin: 0; padding: 0; overflow-y: auto; list-style: none; border: 1px solid var(--rule); border-radius: 0 0 var(--radius) var(--radius); background: var(--paper); box-shadow: 0 6px 16px rgba(16, 24, 40, .12); outline: none; }
+/* 입력 양식 안의 드롭다운 버튼: 다른 입력칸(select)과 같은 모양 */
+.dd-field { justify-content: space-between; width: 100%; height: 36px; padding: 0 10px; border: 1px solid var(--rule); border-radius: var(--radius); background: var(--paper); color: var(--ink); font-size: 14px; font-weight: 400; text-align: left; }
+.dd-field .dd-button-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dd-field:focus-visible, .dd-field[aria-expanded="true"] { outline: 2px solid var(--brand); outline-offset: -1px; }
+.dd-panel { position: fixed; z-index: 100; display: flex; flex-direction: column; min-width: 120px; max-width: min(420px, calc(100vw - 32px)); max-height: 370px; border: 1px solid var(--rule); border-radius: 0 0 var(--radius) var(--radius); background: var(--paper); box-shadow: 0 6px 16px rgba(16, 24, 40, .12); }
+.dd-panel--search { border-radius: var(--radius); }
+.dd-search { flex-shrink: 0; width: 100%; height: 36px; margin: 0; padding: 0 12px; border: 0; border-bottom: 1px solid var(--rule); border-radius: var(--radius) var(--radius) 0 0; background: var(--ground); color: var(--ink); font-size: 13px; }
+.dd-search:focus { outline: 2px solid var(--brand); outline-offset: -2px; }
+.dd-list { flex: 1; min-height: 0; margin: 0; padding: 0; overflow-y: auto; list-style: none; outline: none; }
 .dd-option { position: relative; display: flex; align-items: center; min-height: 36px; padding: 8px 12px; border-bottom: 1px solid var(--rule-soft); color: var(--ink); font-size: 13px; line-height: 1.4; cursor: pointer; }
 .dd-option:last-child { border-bottom: 0; }
 .dd-option.is-cursor { background: #fafbfc; }
 .dd-option[aria-selected="true"] { color: var(--brand); font-weight: 600; }
+.dd-empty { padding: 14px 12px; color: var(--mute); font-size: 13px; text-align: center; }
+/* 숫자 열의 정렬 머리글은 숫자처럼 오른쪽 끝에 붙인다 */
+.data-table--controls th.num .th-sort { width: 100%; justify-content: flex-end; }
 .empty-state .text-button { margin-left: 6px; font-size: 13px; }
 
 .workspace { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 24px; align-items: start; }

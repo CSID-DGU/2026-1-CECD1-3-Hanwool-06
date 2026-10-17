@@ -1,10 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { billGroundwater, billLabel, billNoticeNumber, billUsage, billWindow, buildRisk, buildStations, chartRange, detailHref, latestDate, monthCells, shiftMonth, signedPct } from "../src/pages/Detail/data.js";
+import { billGroundwater, billLabel, billNoticeNumber, billUsage, billWindow, buildRisk, buildStations, chartRange, detailHref, labelWidth, latestDate, monthCells, shiftMonth, signedPct, xLabelStep, xLabelVisible } from "../src/pages/Detail/data.js";
 import { buildDashboard, buildMapGroups, defaultSort, nextSort, referenceTime, sortStations } from "../src/pages/Dashboard/dashboardData.js";
 import { deleteMeter, exportUrl, getData, getMeters, request, restoreMeter, setCsrfToken, startCollection, waitForDownload } from "../src/api.js";
 import { collectionNeedsRefresh, collectionTime, isCollectionActive, meterCollectionState } from "../src/collection.js";
 import { statisticsPeriod } from "../src/pages/statisticsData.js";
+import { nextSortKey, sortRows } from "../src/sorting.js";
 
 test("statistics default period covers today in Korea independently of older risk snapshots", () => {
   assert.deepEqual(statisticsPeriod(new Date("2026-09-22T16:00:00Z")), { start: "2026-01-01", end: "2026-09-23" });
@@ -38,6 +39,54 @@ test("meter list sorts by Korean name both ways with stable tie-breaks and leave
   assert.deepEqual(sortStations(rows, "name-desc").map((r) => r.id), ["c", "e", "d", "b", "a"]);
   assert.equal(JSON.stringify(rows), snapshot);
   assert.deepEqual(sortStations(rows, "unknown-key").map((r) => r.id), ["b", "a", "e", "d", "c"]);
+});
+
+test("x-axis labels thin out by label width and always keep the last label without touching its neighbour", () => {
+  const months = Array.from({ length: 10 }, (_, i) => `2026-${String(i + 1).padStart(2, "0")}`);
+  // 7자 숫자 라벨(약 48px)+여유 12px 가 점 간격 57px 에 들어가지 않으면 2칸마다 찍는다
+  const step = xLabelStep(months, 57);
+  assert.equal(step, 2);
+  const shown = months.map((_, i) => i).filter((i) => xLabelVisible(i, months.length, step));
+  assert.deepEqual(shown, [1, 3, 5, 7, 9]);   // 옛 방식(0,2,4,6,8 + 마지막 9)처럼 8·9가 붙는 일이 없다
+  assert.equal(xLabelStep(months, 400), 1);   // 넓으면 전부
+  assert.equal(xLabelStep(months.map((m) => m.slice(2).replace("-", "/")), 57), 1);   // "26/03" 처럼 줄이면 같은 폭에서 전부 보인다
+  assert.equal(xLabelStep(months, 20, 1), 3);   // 호출한 쪽이 1칸마다를 원해도 좁으면 자동으로 벌린다
+  assert.equal(xLabelStep(["1", "2"], 0), 2);   // 간격이 0이면 마지막 하나만
+  assert.ok(labelWidth("12월") > labelWidth("121"));   // 같은 글자 수라도 한글은 숫자보다 넓게 센다
+  assert.deepEqual([0, 1, 2, 3, 4].filter((i) => xLabelVisible(i, 5, 2)), [0, 2, 4]);
+  assert.deepEqual([0].filter((i) => xLabelVisible(i, 1, 1)), [0]);
+});
+
+test("shared row sorting handles numbers, dates and text with missing values last and a stable tie-break", () => {
+  const rows = [
+    { id: "a", month: "2026-01", won: 300, office: "나" }, { id: "b", month: "2026-03", won: null, office: "가" },
+    { id: "c", month: "2025-12", won: 100, office: "다" }, { id: "d", month: "bad", won: 200, office: "가" },
+  ];
+  const columns = { month: { value: (r) => r.month, type: "date" }, won: { value: (r) => r.won, type: "number" }, office: { value: (r) => r.office, type: "text" } };
+  const tie = (x, y) => x.id.localeCompare(y.id);
+  assert.deepEqual(sortRows(rows, "month-asc", columns, tie).map((r) => r.id), ["c", "a", "b", "d"]);
+  assert.deepEqual(sortRows(rows, "month-desc", columns, tie).map((r) => r.id), ["b", "a", "c", "d"]);
+  assert.deepEqual(sortRows(rows, "won-desc", columns, tie).map((r) => r.id), ["a", "d", "c", "b"]);
+  assert.deepEqual(sortRows(rows, "won-asc", columns, tie).map((r) => r.id), ["c", "d", "a", "b"]);
+  assert.deepEqual(sortRows(rows, "office-asc", columns, tie).map((r) => r.id), ["b", "d", "a", "c"]);
+  assert.deepEqual(sortRows(rows, "nope-asc", columns, tie).map((r) => r.id), ["a", "b", "c", "d"]);   // 모르는 열은 원래 순서
+  assert.equal(JSON.stringify(rows.map((r) => r.id)), '["a","b","c","d"]');   // 원본 불변
+  assert.equal(nextSortKey("month-asc", "won", { won: "desc" }), "won-desc");
+  assert.equal(nextSortKey("won-desc", "won", { won: "desc" }), "won-asc");
+  assert.equal(nextSortKey(undefined, "office"), "office-asc");
+});
+
+test("dashboard usage and delta sort put large values first and missing values last", () => {
+  const rows = [
+    { id: "a", name: "가", displayName: "", customerNo: "1", usage: 12.5, delta: -30 },
+    { id: "b", name: "나", displayName: "", customerNo: "2", usage: null, delta: 45 },
+    { id: "c", name: "다", displayName: "", customerNo: "3", usage: 40, delta: null },
+  ];
+  assert.deepEqual(sortStations(rows, "usage-desc").map((r) => r.id), ["c", "a", "b"]);
+  assert.deepEqual(sortStations(rows, "usage-asc").map((r) => r.id), ["a", "c", "b"]);
+  assert.deepEqual(sortStations(rows, "delta-desc").map((r) => r.id), ["b", "a", "c"]);
+  assert.equal(nextSort("name-asc", "usage"), "usage-desc");
+  assert.equal(nextSort("usage-desc", "delta"), "delta-desc");
 });
 
 test("header clicks toggle direction on the same column and start the other column at its default", () => {

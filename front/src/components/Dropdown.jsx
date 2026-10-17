@@ -3,78 +3,91 @@ import { createPortal } from "react-dom";
 
 // 브라우저 기본 <select> 대신 쓰는 드롭다운. 펼친 목록의 여백·글꼴·색을 우리 스타일로 그린다.
 // 목록은 문서 맨 위(body)에 띄우므로 스크롤 상자(표 머리글 등) 안에서도 잘리지 않는다.
-// options: [{ value, label }]  value: 현재 값  onChange(value)  display: 버튼에 보일 글자(없으면 고른 선택지의 label)
-// buttonClassName: 버튼 모양은 쓰는 곳이 정한다(머리글은 th-dropdown).  active: 강조 표시 여부
+// options: [{ value, label, keywords? }]  value: 현재 값  onChange(value)  display: 버튼에 보일 글자(없으면 고른 선택지의 label)
+// buttonClassName: 버튼 모양은 쓰는 곳이 정한다(머리글은 th-dropdown, 입력 양식은 dd-field).  active: 강조 표시 여부
 // anchor: "button"(기본)이면 버튼 아래에, "parent"면 버튼을 감싼 칸(표 머리글 칸 등)의 왼쪽 끝·폭에 맞춰 목록을 띄운다
-export default function Dropdown({ options, value, onChange, display, label, buttonClassName = "", active = false, align = "left", anchor = "button" }) {
+// searchable: 목록 위에 검색칸을 두고 label·keywords 로 선택지를 걸러 보여 준다(계량기처럼 선택지가 많을 때)
+export default function Dropdown({ options, value, onChange, display, label, buttonClassName = "", active = false, align = "left", anchor = "button",
+  searchable = false, searchPlaceholder = "검색", emptyText = "일치하는 항목이 없습니다." }) {
   const [open, setOpen] = useState(false);
   const [cursor, setCursor] = useState(0);
+  const [query, setQuery] = useState("");
   const [position, setPosition] = useState(null);
   const button = useRef(null);
   const list = useRef(null);
+  const search = useRef(null);
   const id = useId();
   const chosen = options.find((option) => option.value === value);
   const text = display ?? chosen?.label ?? label ?? "";
+  const term = query.trim().toLowerCase();
+  const shown = term ? options.filter((option) => `${option.label} ${option.keywords || ""}`.toLowerCase().includes(term)) : options;
 
-  const close = (focusButton = true) => { setOpen(false); if (focusButton) button.current?.focus(); };
+  const close = (focusButton = true) => { setOpen(false); setQuery(""); if (focusButton) button.current?.focus(); };
   const choose = (option) => { if (option.value !== value) onChange(option.value); close(); };
   const openList = (startAt) => {
     const index = startAt ?? Math.max(0, options.findIndex((option) => option.value === value));
-    setCursor(index); setOpen(true);
+    setCursor(index); setQuery(""); setOpen(true);
   };
 
-  // 버튼 바로 아래(공간이 없으면 위)에 목록을 둔다. 창 크기나 스크롤이 바뀌면 닫는다: 위치를 쫓아가는 것보다 단순하고 어긋나지 않는다.
+  // 버튼(또는 감싼 칸) 바로 아래에 목록을 둔다(공간이 없으면 위). 창 크기나 스크롤이 바뀌면 닫는다: 위치를 쫓아가는 것보다 단순하고 어긋나지 않는다.
   useLayoutEffect(() => {
     if (!open) return;
     const rect = (anchor === "parent" ? button.current.parentElement : button.current).getBoundingClientRect();
-    const estimated = Math.min(options.length, 10) * 36 + 10;
+    const estimated = Math.min(options.length, 10) * 36 + (searchable ? 54 : 10);
     const below = window.innerHeight - rect.bottom >= estimated || rect.top < estimated;
     const gap = anchor === "parent" ? 0 : 4;
     setPosition({ top: below ? rect.bottom + gap : null, bottom: below ? null : window.innerHeight - rect.top + gap,
                   left: align === "right" ? null : rect.left, right: align === "right" ? window.innerWidth - rect.right : null, minWidth: rect.width });
-    list.current?.focus();
-    const onScroll = (event) => { if (!list.current?.contains(event.target)) close(false); };
-    const onPointer = (event) => { if (!list.current?.contains(event.target) && !button.current?.contains(event.target)) close(false); };
+    (searchable ? search.current : list.current)?.focus();
+    const panel = () => list.current?.parentElement;
+    const onScroll = (event) => { if (!panel()?.contains(event.target)) close(false); };
+    const onPointer = (event) => { if (!panel()?.contains(event.target) && !button.current?.contains(event.target)) close(false); };
     window.addEventListener("scroll", onScroll, true);
     window.addEventListener("resize", onScroll);
     document.addEventListener("pointerdown", onPointer);
     return () => { window.removeEventListener("scroll", onScroll, true); window.removeEventListener("resize", onScroll); document.removeEventListener("pointerdown", onPointer); };
-  }, [open, options.length, align, anchor]);
+  }, [open, options.length, align, anchor, searchable]);
 
   useEffect(() => {
     if (!open) return;
     list.current?.children[cursor]?.scrollIntoView({ block: "nearest" });
   }, [open, cursor]);
+  useEffect(() => { setCursor(0); }, [term]);
 
   const onButtonKey = (event) => {
     if (["ArrowDown", "ArrowUp", "Enter", " "].includes(event.key)) { event.preventDefault(); openList(event.key === "ArrowUp" ? options.length - 1 : undefined); }
   };
   const onListKey = (event) => {
-    const last = options.length - 1;
-    if (event.key === "Escape" || event.key === "Tab") { event.preventDefault(); close(); }
+    const last = shown.length - 1;
+    if (event.key === "Escape" || (event.key === "Tab" && !searchable)) { event.preventDefault(); close(); }
     else if (event.key === "ArrowDown") { event.preventDefault(); setCursor((i) => Math.min(last, i + 1)); }
     else if (event.key === "ArrowUp") { event.preventDefault(); setCursor((i) => Math.max(0, i - 1)); }
     else if (event.key === "Home") { event.preventDefault(); setCursor(0); }
     else if (event.key === "End") { event.preventDefault(); setCursor(last); }
-    else if (event.key === "Enter" || event.key === " ") { event.preventDefault(); if (options[cursor]) choose(options[cursor]); }
+    else if (event.key === "Enter" || (event.key === " " && !searchable)) { event.preventDefault(); if (shown[cursor]) choose(shown[cursor]); }
+    else if (event.key === "Tab") close();
   };
 
+  const listId = `${id}-list`;
   return <>
     <button ref={button} type="button" className={`dd-button ${buttonClassName} ${active ? "is-active" : ""}`} aria-haspopup="listbox" aria-expanded={open}
-      aria-controls={open ? `${id}-list` : undefined} aria-label={label ? `${label}: ${text}` : undefined} title={label} onClick={() => (open ? close() : openList())} onKeyDown={onButtonKey}>
+      aria-controls={open ? listId : undefined} aria-label={label ? `${label}: ${text}` : undefined} title={label} onClick={() => (open ? close() : openList())} onKeyDown={onButtonKey}>
       <span className="dd-button-text">{text}</span><span className="dd-mark" aria-hidden="true" />
     </button>
     {open && position && createPortal(
-      <ul ref={list} id={`${id}-list`} className="dd-list" role="listbox" tabIndex={-1} aria-label={label} aria-activedescendant={`${id}-${cursor}`}
-        style={{ top: position.top ?? undefined, bottom: position.bottom ?? undefined, left: position.left ?? undefined, right: position.right ?? undefined, minWidth: position.minWidth }}
-        onKeyDown={onListKey}>
-        {options.map((option, index) => (
-          <li key={option.value} id={`${id}-${index}`} role="option" aria-selected={option.value === value}
-            className={`dd-option ${index === cursor ? "is-cursor" : ""}`}
-            onPointerMove={() => setCursor(index)} onClick={() => choose(option)}>
-            {option.label}
-          </li>
-        ))}
-      </ul>, document.body)}
+      <div className={`dd-panel ${searchable ? "dd-panel--search" : ""}`} style={{ top: position.top ?? undefined, bottom: position.bottom ?? undefined, left: position.left ?? undefined, right: position.right ?? undefined, minWidth: position.minWidth }} onKeyDown={onListKey}>
+        {searchable && <input ref={search} className="dd-search" type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={searchPlaceholder}
+          aria-label={`${label || ""} 검색`} aria-controls={listId} aria-activedescendant={shown[cursor] ? `${id}-${cursor}` : undefined} autoComplete="off" />}
+        <ul ref={list} id={listId} className="dd-list" role="listbox" tabIndex={-1} aria-label={label} aria-activedescendant={searchable ? undefined : `${id}-${cursor}`}>
+          {shown.map((option, index) => (
+            <li key={option.value} id={`${id}-${index}`} role="option" aria-selected={option.value === value}
+              className={`dd-option ${index === cursor ? "is-cursor" : ""}`}
+              onPointerMove={() => setCursor(index)} onClick={() => choose(option)}>
+              {option.label}
+            </li>
+          ))}
+          {!shown.length && <li className="dd-empty" aria-live="polite">{emptyText}</li>}
+        </ul>
+      </div>, document.body)}
   </>;
 }

@@ -114,6 +114,20 @@ export function billWindow(bills, ym) {
   });
 }
 
+// 12px 축 글씨 기준 라벨 폭(px). 한글·전각은 글자 하나가 한 칸, 숫자·기호는 그보다 좁다.
+export function labelWidth(label) {
+  return [...String(label ?? "")].reduce((width, ch) => width + (ch.charCodeAt(0) > 0x7f ? 12 : 6.8), 0);
+}
+
+// 축 라벨을 몇 개마다 하나씩 찍을지. 가장 긴 라벨이 점 사이 간격(slot)에 여유(gap)를 두고 들어가야 겹치지 않는다.
+// minStep 은 호출한 쪽이 원하는 최소 간격(labelEvery). 라벨은 마지막 점에서 거꾸로 step 마다 찍는다(xLabelVisible).
+export function xLabelStep(labels, slot, minStep = 1, gap = 12) {
+  const widest = Math.max(0, ...labels.map(labelWidth));
+  const needed = slot > 0 ? Math.ceil((widest + gap) / slot) : labels.length;
+  return Math.max(1, minStep || 1, needed);
+}
+export const xLabelVisible = (index, count, step) => (count - 1 - index) % step === 0;
+
 export function chartRange(values, showValues = false) {
   const finite = values.filter(Number.isFinite);
   if (!finite.length) return null;
