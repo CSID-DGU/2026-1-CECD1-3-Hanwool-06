@@ -176,7 +176,6 @@ def publish_data(daily, risk, *, output_dir, withheld=()):
 def refresh_bills(start, end, meters, runtime):
     import pandas as pd
     from back.scripts.billing_etl.crawl_bills import collect_bills
-    from back.scripts.dataset_etl.build_clean_dataset import build_bills_bimonthly
     raw_dir = runtime / "raw" / "billing_i121"
     report = collect_bills(start_ym=str(start)[:7], end_ym=str(end)[:7],
         mkeys=[m["customer_number"] for m in collector_meters(meters, daily=False)],
@@ -193,6 +192,18 @@ def refresh_bills(start, end, meters, runtime):
     from back.api.import_data import upsert_bill_summaries
     with db.connect() as conn:
         upsert_bill_summaries(conn, raw.where(pd.notna(raw), None).to_dict("records"))
+    build_model_bills(meters, runtime)
+    return report
+
+
+def build_model_bills(meters, runtime):
+    """Model bill baseline from the historical export plus every bill collected since; sends no requests."""
+    import pandas as pd
+    from back.scripts.dataset_etl.build_clean_dataset import build_bills_bimonthly
+    path = runtime / "raw" / "billing_i121" / "i121_bills" / "bills_long.csv"
+    if not path.exists():
+        return
+    raw = pd.read_csv(path, encoding="utf-8-sig", dtype={"mkey": str, "notice_number": str}, keep_default_na=False)
     raw = raw[raw["gubun"] == "정기분"].rename(columns={"mkey": "고객번호", "napgi": "납기일", "total_usage_ton": "총사용량_톤", "bugwa_amount_won": "부과금액_원"})
     metadata = {customer_number(m["customer_number"]): m for m in meters}
     raw["고객번호"] = raw["고객번호"].map(customer_number)
@@ -209,7 +220,6 @@ def refresh_bills(start, end, meters, runtime):
     labels = pd.DataFrame([{"고객번호": k, "역명": m["station_name"]} for k, m in metadata.items()])
     result = build_bills_bimonthly(clean_path, meter_labels=labels)
     atomic_text(runtime / "processed" / "water_bills.csv", result.to_csv(index=False), encoding="utf-8-sig")
-    return report
 
 
 def run(args):
@@ -268,6 +278,8 @@ def _run(args):
             cfg = yaml.safe_load((ROOT / "back" / "ml" / "lightgbm" / "config.yaml").read_text())
             cfg["data"] = {split: str((dataset_dir / f"{split}.csv").resolve()) for split in ["train", "valid", "test"]}
             cfg["data"]["calendar"] = str((dataset_dir / "calendar.csv").resolve())
+            if args.model:
+                build_model_bills(meters, runtime)   # bills collected after the historical export count too
             bills_path = runtime / "processed" / "water_bills.csv"
             cfg["data"]["bills"] = str((bills_path if bills_path.exists() else ROOT / "data" / "processed" / "water_bills.csv").resolve())
             cfg["model"]["device"] = "cpu"

@@ -285,13 +285,13 @@ class IncrementalTest(unittest.TestCase):
             return [self.row(value=3186)]
         with patch.object(inc, 'fetch_month', side_effect=fetch), patch.object(inc, 'collect_bills', return_value={'rows': [], 'errors': []}):
             result = inc.collect_meter(self.meter)
-        self.assertEqual(result['status'], 'partial')
+        self.assertEqual(result['status'], 'success')   # a gap in Arisu's own readings is a notice, not a failure
         self.assertEqual(result['daily_rows'], 1)
         self.assertIn('2026-06-02 아리수 검침값 누락', result['message'])
         self.assertEqual(catalog.data_sources()[0]['000000001']['usage'], [{'date': '2026-06-01', 'value': 3186.0}])
         state = json.loads((config.DATA_DIR / 'collection/000000001.json').read_text())
         self.assertEqual(state['water_excluded'], ['2026-06-02'])
-        # the same source gap is remembered: the next run is not reported as a partial failure again
+        # the same source gap is remembered and not reported again
         with patch.object(inc, 'fetch_month', side_effect=fetch), patch.object(inc, 'collect_bills', return_value={'rows': [], 'errors': []}):
             again = inc.collect_meter(self.meter)
         self.assertNotIn('누락', again['message'])
@@ -302,6 +302,40 @@ class IncrementalTest(unittest.TestCase):
         with patch.object(inc, 'fetch_month', side_effect=fixed), patch.object(inc, 'collect_bills', return_value={'rows': [], 'errors': []}):
             inc.collect_meter(self.meter)
         self.assertEqual(json.loads((config.DATA_DIR / 'collection/000000001.json').read_text())['water_excluded'], [])
+
+    def test_run_without_bill_check_collects_daily_usage_and_keeps_pending_bill_windows(self):
+        state = config.DATA_DIR / 'collection/000000001.json'
+        with patch.object(inc, 'fetch_month', return_value=[self.row()]), patch.object(inc, 'collect_bills',
+                return_value={'rows': [], 'errors': [{'start': '2025-07', 'error': 'ReadTimeout'}]}):
+            inc.collect_meter(self.meter)
+        pending = json.loads(state.read_text())['bill_retry_windows']
+        self.assertTrue(pending)
+        with patch.object(inc, 'fetch_month', return_value=[self.row()]), patch.object(inc, 'collect_bills') as bills:
+            result = inc.collect_meter(self.meter, include_bills=False)
+        bills.assert_not_called()
+        self.assertEqual((result['status'], result['daily_rows'], result['bill_rows']), ('success', 1, 0))
+        self.assertIn('청구서는 매주 월요일에 확인', result['message'])
+        self.assertEqual(json.loads(state.read_text())['bill_retry_windows'], pending)   # the Monday check still retries them
+
+    def test_model_bill_baseline_adds_collected_bills_to_the_historical_export(self):
+        path = config.DATA_DIR / 'raw/billing_i121/i121_bills/bills_long.csv'
+        path.parent.mkdir(parents=True)
+        rows = [{'mkey': '000000001', 'napgi': '2026-08-31', 'gubun': '정기분', 'notice_number': '', 'total_usage_ton': 60, 'bugwa_amount_won': 900},
+                {'mkey': '000000001', 'napgi': '2026-09-15', 'gubun': '수시분', 'notice_number': '090000001', 'total_usage_ton': 5, 'bugwa_amount_won': 50},
+                {'mkey': '000000002', 'napgi': '2026-08-31', 'gubun': '정기분', 'notice_number': '', 'total_usage_ton': 70, 'bugwa_amount_won': 990}]
+        with path.open('w', encoding='utf-8-sig', newline='') as stream:
+            writer = csv.DictWriter(stream, fieldnames=list(rows[0]))
+            writer.writeheader()
+            writer.writerows(rows)
+        import pandas as pd
+        old = pd.DataFrame([{'고객번호': '000000001', '역명': '가역', '영업사업소': '사업소', '용도': '', '납기일': '2026-06-30',
+                             '총사용량_톤': 40, '부과금액_원': 600}])
+        with patch.object(refresh, '_read_csv', return_value=old):
+            refresh.build_model_bills([self.meter], config.DATA_DIR)
+        built = pd.read_csv(config.DATA_DIR / 'processed/water_bills.csv', encoding='utf-8-sig', dtype={'고객번호': str})
+        # the stored bill and the newly collected one; supplementary notices and unregistered customers stay out
+        self.assertEqual(built[['고객번호', '종료연월', '격월사용량_톤']].values.tolist(),
+                         [['000000001', '2026-06', 40.0], ['000000001', '2026-08', 60.0]])
 
     def test_remote_default_customer_is_not_accepted_for_another_customer(self):
         session = Mock()

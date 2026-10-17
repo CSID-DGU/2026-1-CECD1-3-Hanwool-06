@@ -383,6 +383,25 @@ class PipelineTest(unittest.TestCase):
         self.assertEqual(manifest['risk_as_of'], '2026-05-31')
         self.assertEqual(json.loads((self.path / 'snapshot' / manifest['directory'] / 'risk.json').read_text()), risk)
 
+    def test_model_refresh_reads_bills_collected_after_the_historical_export(self):
+        master = pd.DataFrame({'고객번호': ['000000001'], '날짜': ['2026-06-01'], '일사용량_톤': [12.]})
+        riders = pd.DataFrame({'고객번호': ['000000001'], '날짜': ['2026-06-01'], '총승객수': [30.]})
+        merge_csv(self.path / 'raw/billing_i121/i121_bills/bills_long.csv',
+                  [{'mkey': '000000001', 'napgi': '2026-08-31', 'gubun': '정기분', 'notice_number': '', 'total_usage_ton': 60, 'bugwa_amount_won': 900}],
+                  ['mkey', 'napgi', 'gubun', 'notice_number', 'total_usage_ton', 'bugwa_amount_won'], ['mkey', 'napgi', 'gubun', 'notice_number'])
+        args = Namespace(runtime_dir=self.path, start=date(2026, 6, 1), end=date(2026, 6, 1),
+                         water=False, ridership=False, bills=False, model=True, train_end=None, valid_end=None, test_end=None, jobs=1)
+        with patch('back.api.catalog.collector_meters', return_value=METERS), \
+             patch('back.api.catalog.data_sources', return_value=({}, {})), \
+             patch.object(refresh, 'build_dataset', return_value=(master, riders, [], set())), \
+             patch.object(refresh, 'build_calendar'):
+            refresh.run(args)
+        config = (self.path / 'dataset/config.yaml').read_text()
+        self.assertIn(str((self.path / 'processed/water_bills.csv').resolve()), config)
+        built = pd.read_csv(self.path / 'processed/water_bills.csv', encoding='utf-8-sig', dtype={'고객번호': str})
+        self.assertIn('2026-08', set(built[built['고객번호'] == '000000001']['종료연월']))
+        self.assertGreater(built['고객번호'].nunique(), 1)   # the historical export stays in the baseline
+
     def test_model_refresh_that_cannot_run_keeps_the_previous_risk_and_fails(self):
         master = pd.DataFrame({'고객번호': ['000000001'], '날짜': ['2026-06-01'], '일사용량_톤': [12.]})
         riders = pd.DataFrame({'고객번호': ['000000001'], '날짜': ['2026-06-01'], '총승객수': [30.]})

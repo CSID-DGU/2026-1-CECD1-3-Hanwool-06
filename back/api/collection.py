@@ -14,6 +14,8 @@ KST = ZoneInfo('Asia/Seoul')
 DAILY_HOUR = 8
 # Network failures in that run are retried twice, 30 minutes apart; what still fails is mailed to superadmins once.
 RETRY_LIMIT, RETRY_DELAY = 2, timedelta(minutes=30)
+# Bills change monthly at most: the Monday run checks every meter's bills, other days only daily usage.
+BILL_WEEKDAY = 0
 ACTIVE = ('queued', 'running')
 FAILED = ('failed', 'partial', 'interrupted', 'configuration_required')
 logger = logging.getLogger(__name__)
@@ -37,7 +39,7 @@ def settings(c, current=None):
             'next_run_at': next_run.isoformat() if config.COLLECTION_WORKER_ENABLED else None}
 
 
-def enqueue(c, meter_ids, trigger, actor_id=None):
+def enqueue(c, meter_ids, trigger, actor_id=None, include_bills=True):
     """Caller holds BEGIN IMMEDIATE, so a customer cannot be queued twice."""
     if not meter_ids:
         raise HTTPException(422, '수집할 활성 아리수 계량기가 없습니다.')
@@ -45,8 +47,8 @@ def enqueue(c, meter_ids, trigger, actor_id=None):
     busy = c.execute(f"SELECT 1 FROM collection_items WHERE meter_id IN ({placeholders}) AND status IN ('queued','running') LIMIT 1", meter_ids).fetchone()
     if busy:
         raise HTTPException(409, '이미 수집 중이거나 수집을 기다리는 계량기입니다.')
-    job_id = c.execute("INSERT INTO collection_jobs(status,trigger,actor_id,created_at) VALUES('queued',?,?,?)",
-                       (trigger, actor_id, db.now())).lastrowid
+    job_id = c.execute("INSERT INTO collection_jobs(status,trigger,actor_id,created_at,include_bills) VALUES('queued',?,?,?,?)",
+                       (trigger, actor_id, db.now(), int(include_bills))).lastrowid
     c.executemany('INSERT INTO collection_items(job_id,meter_id) VALUES(?,?)', [(job_id, m) for m in meter_ids])
     return job_id
 
@@ -122,10 +124,13 @@ def schedule_due(c, current=None):
         return None
     last = c.execute("SELECT value FROM settings WHERE key='collection_auto_day'").fetchone()
     if not last or last[0] != day:
-        ids = [m['id'] for m in catalog.list_meters(c) if m['active'] and m['provider'] == 'arisu']
+        bills = current.weekday() == BILL_WEEKDAY
+        ids = [m['id'] for m in catalog.list_meters(c) if m['active'] and m['provider'] == 'arisu' and (bills or m['daily_enabled'])]
         if ids:
-            enqueue(c, ids, 'automatic')
-            c.execute("INSERT INTO settings VALUES('collection_auto_day',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (day,))
+            enqueue(c, ids, 'automatic', include_bills=bills)
+        c.execute("INSERT INTO settings VALUES('collection_auto_day',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (day,))
+        if not ids:   # nothing to collect today, so the refresh timer need not wait
+            c.execute("INSERT INTO settings VALUES('collection_auto_settled',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (day,))
         return None
     settled = c.execute("SELECT value FROM settings WHERE key='collection_auto_settled'").fetchone()
     if settled and settled[0] == day:
@@ -133,21 +138,22 @@ def schedule_due(c, current=None):
     meters = {m['id']: m for m in catalog.list_meters(c) if m['active'] and m['provider'] == 'arisu'}
     # Today's run is the latest automatic job and the retries queued after it.
     start = c.execute("SELECT max(id) FROM collection_jobs WHERE trigger='automatic'").fetchone()[0]
-    jobs = c.execute("SELECT id,trigger,finished_at FROM collection_jobs WHERE id>=? AND trigger IN ('automatic','automatic_retry')", (start,)).fetchall()
+    jobs = c.execute("SELECT id,trigger,finished_at,include_bills FROM collection_jobs WHERE id>=? AND trigger IN ('automatic','automatic_retry') ORDER BY id", (start,)).fetchall()
+    bills = not jobs or bool(jobs[0]['include_bills'])   # retries repeat the day's run as it was
     marks = ','.join('?' for _ in jobs)
     # Each meter's latest result counts, including a manual update after the automatic run.
     latest = c.execute(f'SELECT i.* FROM collection_items i JOIN (SELECT meter_id,max(job_id) job_id FROM collection_items '
                        f'WHERE meter_id IN (SELECT meter_id FROM collection_items WHERE job_id IN ({marks})) GROUP BY meter_id) '
                        'USING(meter_id,job_id) ORDER BY meter_id', [j['id'] for j in jobs]).fetchall()
     failed = [r for r in latest if r['status'] in FAILED and r['meter_id'] in meters]
-    retry = [r['meter_id'] for r in failed if r['status'] == 'interrupted' or r['retryable']]
+    retry = [r['meter_id'] for r in failed if (r['status'] == 'interrupted' or r['retryable']) and (bills or meters[r['meter_id']]['daily_enabled'])]
     retries = sum(j['trigger'] == 'automatic_retry' for j in jobs)
     # A login rejected by any job since then stops retries too: each retry job would log in again.
     rejected = c.execute("SELECT 1 FROM settings WHERE key='collection_login_rejected' AND CAST(value AS INTEGER)>=?", (start,)).fetchone()
     if retry and retries < RETRY_LIMIT and not rejected:
         finished = max((j['finished_at'] for j in jobs if j['finished_at']), default=None)
         if not finished or current >= datetime.fromisoformat(finished) + RETRY_DELAY:
-            enqueue(c, retry, 'automatic_retry')
+            enqueue(c, retry, 'automatic_retry', include_bills=bills)
         return None
     # The refresh timer waits for this mark before retraining on the day's data.
     c.execute("INSERT INTO settings VALUES('collection_auto_settled',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (day,))
@@ -177,7 +183,7 @@ def run_job(job_id, stop):
     from back.scripts.billing_etl.i121_crawler.auth import collection_session, transient
     session = None
 
-    def collect_shared(meter, progress):
+    def collect_shared(meter, progress, include_bills=True):
         nonlocal session
         if session is None:
             try:
@@ -190,7 +196,7 @@ def run_job(job_id, stop):
             if isinstance(login_error, str) and not transient(login_error):
                 with db.connect() as c:
                     c.execute("INSERT INTO settings VALUES('collection_login_rejected',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(job_id),))
-        return collect_meter(meter, progress=progress, session=session)
+        return collect_meter(meter, progress=progress, session=session, include_bills=include_bills)
     try:
         _run_job(job_id, stop, collect_shared)
     finally:
@@ -227,6 +233,7 @@ def failure_result(exc):
 
 def _run_job(job_id, stop, collect_meter):
     with db.connect() as c:
+        include_bills = bool(c.execute('SELECT include_bills FROM collection_jobs WHERE id=?', (job_id,)).fetchone()[0])
         ids = [r[0] for r in c.execute("SELECT meter_id FROM collection_items WHERE job_id=? AND status='queued' ORDER BY meter_id", (job_id,))]
     for meter_id in ids:
         if stop.is_set():
@@ -246,7 +253,7 @@ def _run_job(job_id, stop, collect_meter):
             with db.connect() as c:
                 c.execute('UPDATE collection_items SET message=? WHERE job_id=? AND meter_id=?', (message, job_id, meter_id))
         try:
-            result = collect_meter(meter, progress=progress)
+            result = collect_meter(meter, progress=progress, include_bills=include_bills)
         except Exception as exc:
             logger.error('Collection failed for job %s (%s)', job_id, type(exc).__name__)
             result = failure_result(exc)

@@ -15,7 +15,9 @@ The web server owns the daily schedule (fixed at 08:00 Asia/Seoul), persisted jo
 manual updates. Meters that failed on a network error (timeout, connection, HTTP 429/5xx) or
 were interrupted are retried twice, 30 minutes apart; a rejected login is never retried because
 each retry logs in again. When the day's run settles (`collection_auto_settled` in `settings`),
-active superadmins get one mail listing what still failed.
+active superadmins get one mail listing what still failed. Bills change monthly at most, so
+only the Monday run checks every meter's bills; other days collect the daily usage of
+daily-enabled meters, and manual updates always include bills.
 To pause collection, set `COLLECTION_WORKER_ENABLED=false` on the server
 and restart it; queued jobs wait until it is enabled again. Registration/restoration queues a
 connection check automatically. A job shares one authenticated Arisu session across
@@ -35,7 +37,9 @@ The account's registered customer list is checked for daily readings only. Publi
 use customer number and the exact registered name, independently of member registration.
 A daily access failure does not prevent bill collection. Historical JSON readings and the latest unbilled
 JSON readings are merged by observation date, through the last completed day.
-Identical readings repeated in different billing periods are kept once; conflicting
+A day the source itself leaves missing or invalid is excluded, reported once as a notice
+rather than a failed collection, and remembered. Identical readings repeated in different
+billing periods are kept once; conflicting
 observations and mismatched customer responses fail validation. Levy pages are
 paginated, and invalid cached customer/date records are fetched again.
 
@@ -97,6 +101,8 @@ are fixed from validation; later test observations cannot change earlier scores.
 Bill baselines use only bills available before the observation. Historical exports lack
 an exact issue date, so the first day after the ending billing month is the conservative
 availability boundary; incomplete one-month buckets are excluded from this baseline.
+Each `--model` run rebuilds that bill file (`APP_DATA_DIR/processed/water_bills.csv`) from the
+historical export plus every regular bill collected since, without new bill requests.
 
 A contract needs at least 90 training observations and 14 validation observations for
 risk publication. New contracts still show observations; `manifest.withheld` records
